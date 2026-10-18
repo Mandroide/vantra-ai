@@ -29,10 +29,9 @@ publicar credenciales.
 - El archivo `pyproject.toml` es la fuente de dependencias. `requirements.txt` se conserva por compatibilidad.
 
 ```bash
-git clone <URL_A_COMPLETAR_DESPUES_DE_PUBLICAR_EN_GITHUB>
+git clone https://github.com/Mandroide/vantra-ai
 cd vantra-ai
 # Si el paquete sigue sin publicarse, abra esta carpeta directamente.
-uv lock                 # SOLO PRIMERA VEZ, si todavía no existe uv.lock
 uv sync --group dev
 cp .env.example .env    # Windows: copy .env.example .env
 uv run python app.py
@@ -113,7 +112,7 @@ voz Azure es una opción de configuración, **no evidencia de naturalidad** en u
 - Azure: https://learn.microsoft.com/azure/ai-services/speech-service/how-to-speech-synthesis
 - Gradio: https://www.gradio.app/main/docs/gradio/audio
 
-## 4. Pruebas y evaluación reproducibles
+## 4. Pruebas y evaluación reproducible
 
 ```bash
 uv run python -m pytest -q
@@ -181,13 +180,11 @@ Se trata de **una distribución propuesta**, no de un registro de tareas ejecuta
 
 ## 8. Publicación pendiente (requiere cuentas autorizadas)
 
-1. Cree un repositorio **público** en GitHub, suba esta carpeta (sin `.env`, datos privados ni archivos SQLite), copie
-   el URL y reemplace `<URL_A_COMPLETAR...>`.
-2. Para despliegue en Hugging Face Spaces, cree un Space Gradio y configure los secretos allí. Active
+1. Para despliegue en Hugging Face Spaces, cree un Space Gradio y configure los secretos allí. Active
    autenticación/consentimiento y revise cache de audios. Verifique permisos y consumo antes de divulgarlo.
-3. Copie el paquete de evidencias y el informe en Drive y habilite acceso mediante enlace **solo para materiales
+2. Copie el paquete de evidencias y el informe en Drive y habilite acceso mediante enlace **solo para materiales
    públicos/sintéticos**, después de verificar que no hay secretos.
-4. Ejecute LIVE con credenciales propias, grabe video con consentimiento, mida latencias y costos, complete la tabla
+3. Ejecute LIVE con credenciales propias, grabe video con consentimiento, mida latencias y costos, complete la tabla
    real y sustituya secciones «PENDIENTE» del informe.
 
 **No se publicaron repositorios, Spaces ni carpetas Drive automáticamente**, porque no hay acceso autorizado a esas
