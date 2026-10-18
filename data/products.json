@@ -1,0 +1,8 @@
+{
+ "notice":"BANCO DEMO: institución, tasas y requisitos son completamente ficticios; no son ofertas ni asesoramiento financiero.",
+ "products":[
+  {"id":"tarjeta","name":"Tarjeta de crédito Demo","description":"Tarjeta simulada para compras nacionales e internacionales.","requirements":["Mayor de edad","Documento ficticio","Ingresos ficticios"],"annual_rate_pct":48.0},
+  {"id":"prestamo","name":"Préstamo personal Demo","description":"Financiamiento ficticio en pesos dominicanos.","requirements":["Mayor de edad","Documento ficticio","Constancia de ingresos ficticia"],"annual_rate_pct":18.5,"max_months":60},
+  {"id":"certificado","name":"Certificado financiero Demo","description":"Depósito a plazo enteramente ficticio.","requirements":["Identificación ficticia","Monto inicial ficticio"],"annual_rate_pct":7.0}
+ ]
+}

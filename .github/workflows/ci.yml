@@ -1,0 +1,98 @@
+name: Vantra AI · CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-tests:
+    name: Pruebas / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      VANTRA_MODE: DEMO
+      PYTHONPATH: .
+      VANTRA_DB_PATH: ${{ runner.temp }}/vantra_ci_${{ matrix.python-version }}.sqlite3
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.10.0"
+          enable-cache: true
+      - name: Instalar Python
+        run: uv python install "${UV_PYTHON}"
+      - name: Comprobar/generar archivo de bloqueo
+        shell: bash
+        run: |
+          if test -f uv.lock; then
+            uv lock --check
+          else
+            echo '::warning::uv.lock falta: CI resuelve dependencias para esta ejecución; generar uv lock y versionarlo para reproducibilidad.'
+            uv lock
+          fi
+      - name: Instalar dependencias bloqueadas
+        run: uv sync --locked --group dev
+      - name: Lint (Ruff)
+        run: uv run --locked ruff check .
+      - name: Verificar secretos y archivos sensibles
+        run: uv run --locked python scripts/check_secrets.py
+      - name: Pruebas y cobertura
+        run: uv run --locked python -m pytest -q --cov=src --cov=app --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
+      - name: Evaluación reproducible sin proveedores externos
+        run: uv run --locked python scripts/run_evaluation.py
+      - name: Comprobar resultados 36 casos
+        shell: bash
+        run: |
+          uv run --locked python - <<'PY'
+          import json
+          from pathlib import Path
+          summary = json.loads(Path('results/summary_demo.json').read_text(encoding='utf-8'))
+          assert summary['total'] == 36 and summary['passed'] == 36, summary
+          print(f"Evaluación offline: {summary['passed']}/{summary['total']}")
+          PY
+      - name: Guardar cobertura y evaluación (datos sintéticos)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vantra-evidencia-py${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            uv.lock
+            results/demo_evaluation_36.csv
+            results/subgroups_demo.csv
+            results/summary_demo.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  docker-build:
+    name: Comprobar build Docker (sin despliegue)
+    runs-on: ubuntu-latest
+    needs: quality-and-tests
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Validar imagen (sin credenciales ni publicación)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: vantra-ai:mvp-ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

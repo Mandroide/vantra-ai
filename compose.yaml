@@ -1,0 +1,25 @@
+services:
+  vantra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vantra-ai:mvp
+    init: true
+    ports:
+      - "127.0.0.1:${VANTRA_PORT:-7860}:7860"
+    environment:
+      VANTRA_MODE: ${VANTRA_MODE:-DEMO}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-}
+      AZURE_SPEECH_VOICE: ${AZURE_SPEECH_VOICE:-es-DO-RamonaNeural}
+      ENABLE_LOCAL_TTS: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    # El puerto se enlaza solo a localhost. Nunca exponga LIVE sin autenticación y límites.

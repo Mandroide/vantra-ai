@@ -1,0 +1,33 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+# Entornos / Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+# Artefactos de pruebas y cobertura
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+*.log
+# Almacenamiento de la demo
+*.db
+*.sqlite3
+results/live_*.csv
+results/private_*.json
+# IDE / SO
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+# Archivos temporales
+*.tmp
+*.bak

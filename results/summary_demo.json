@@ -1,0 +1,13 @@
+{
+  "generated_utc": "2026-10-18T16:36:11.676829+00:00",
+  "total": 36,
+  "passed": 36,
+  "failed": [],
+  "evaluation_scope": "DEMO offline: regla de texto + evento de herramienta. No evalúa audio, WER, Anthropic, Deepgram, Azure ni desempeño comercial real.",
+  "limitations": [
+    "Casos sintéticos predefinidos",
+    "No mide generalización, sesgos demográficos ni precisión de LLM en vivo",
+    "Tiempos de CPU no comparables con latencia de servicios externos",
+    "Costo real de API no estimable sin credenciales y consumo."
+  ]
+}
