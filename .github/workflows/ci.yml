@@ -28,7 +28,7 @@ jobs:
       VANTRA_DB_PATH: ${{ runner.temp }}/vantra_ci_${{ matrix.python-version }}.sqlite3
     steps:
       - name: Obtener código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Instalar uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -86,7 +86,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - name: Validar imagen (sin credenciales ni publicación)
         uses: docker/build-push-action@v7
