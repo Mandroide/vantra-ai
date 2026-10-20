@@ -1,26 +1,47 @@
 # Vantra AI — MVP académico de agente bancario de voz
 
 **UASD · Maestría en Ciencia de Datos e Inteligencia Artificial · Capstone Projects · Fase 2**  
-**Fecha del paquete:** 18 de octubre de 2026. **Banco Demo es ficticio.** No use datos reales.
+**Fecha del paquete:** 18 de octubre de 2026. **Banco Demo es ficticio.** No utilice datos bancarios reales; la
+telefonía solo debe dirigirse a personas que hayan autorizado expresamente el piloto.
+
+## Llamadas salientes reales a teléfonos dominicanos (actualización de octubre de 2026)
+
+Se añadió una pestaña **«Llamada REAL · piloto restringido»**, junto a la campaña saliente simulada original. La
+implementación utiliza **Twilio Programmable Voice + FastAPI + WebSocket bidireccional**, Deepgram streaming, Azure
+Speech RAW μ-law 8 kHz y el agente Python/Claude. Permite **solo** números preautorizados +1809/+1829/+1849,
+confirmación manual, lista DNC, 1 llamada simultánea, límite de 3 solicitudes diarias y horario laboral local. La
+capacidad está **apagada** de fábrica.
+
+**Para usarla** debe ejecutar un segundo proceso
+(`uv run uvicorn src.telephony_server:app --host 127.0.0.1 --port 8000`) y configurar un túnel público HTTPS/WSS a 8000,
+credenciales Twilio, `TWILIO_TEST_NUMBERS`, y después habilitar `TWILIO_CALLS_ENABLED=true` en `.env`. En Docker Compose
+el segundo proceso se llama `twilio-webhook`.
+
+**Lea antes de habilitar:** [`docs/telefonia_dominicana.md`](docs/telefonia_dominicana.md). Allí se describen pasos,
+arquitectura, límites, permisos de Twilio, privacidad y diagnóstico. Las pruebas automatizadas **no** hacen llamadas ni
+usan créditos.
+
+---
 
 ## 1. Estado exacto de implementación
 
-| Función                                          | DEMO sin claves                       | LIVE con APIs                                                   |
-|--------------------------------------------------|---------------------------------------|-----------------------------------------------------------------|
-| Consultas bancarias por texto                    | Implementada, determinista            | Implementada, determinista                                      |
-| Catálogo, tasas y cuotas                         | Implementada                          | Implementada                                                    |
-| Memoria de producto en la sesión                 | Implementada                          | Implementada                                                    |
-| Prospectos y devoluciones de llamada simuladas   | Implementada                          | Implementada                                                    |
-| Escalamientos simulados                          | Implementada                          | Implementada                                                    |
-| Campaña saliente de demostración (sin telefonía) | Implementada                          | Implementada                                                    |
-| Texto libre mediante Claude                      | Respuesta de reserva determinista     | Integración de código disponible; **requiere probar con clave** |
-| Audio de entrada vía Deepgram                    | No                                    | Integración de código disponible; **requiere probar con clave** |
-| Audio de salida vía Azure Speech                 | TTS local opcional, voz no dominicana | Integración de código disponible; **requiere probar con clave** |
-| Llamadas telefónicas reales, CRM bancario real   | No                                    | No                                                              |
+| Función                                        | DEMO sin claves                       | LIVE con APIs                                                                     |
+|------------------------------------------------|---------------------------------------|-----------------------------------------------------------------------------------|
+| Consultas bancarias por texto                  | Implementada, determinista            | Implementada, determinista                                                        |
+| Catálogo, tasas y cuotas                       | Implementada                          | Implementada                                                                      |
+| Memoria de producto en la sesión               | Implementada                          | Implementada                                                                      |
+| Prospectos y devoluciones de llamada simuladas | Implementada                          | Implementada                                                                      |
+| Escalamientos simulados                        | Implementada                          | Implementada                                                                      |
+| Campaña saliente simulada                      | Implementada                          | Implementada                                                                      |
+| **Una llamada real por vez (Twilio / RD)**     | No; apagado por defecto               | **Código incorporado; sin prueba real**, requiere Twilio, túnel y lista permitida |
+| Texto libre mediante Claude                    | Respuesta de reserva determinista     | Integración de código disponible; **requiere probar con clave**                   |
+| Audio de entrada vía Deepgram                  | No                                    | Integración de código disponible; **requiere probar con clave**                   |
+| Audio de salida vía Azure Speech               | TTS local opcional, voz no dominicana | Integración de código disponible; **requiere probar con clave**                   |
+| CRM bancario o transferencias humanas reales   | No                                    | No                                                                                |
 
-**No se ha comprobado el circuito LIVE con servicios externos**. La interfaz funciona en modo DEMO por texto sin
-contratar servicios. El modo LIVE es una integración propuesta y codificada, no un resultado experimental validado. No
-publicar credenciales.
+**No se ha comprobado el circuito LIVE con servicios externos, ni se realizó ninguna llamada real a un teléfono
+dominicano**. La interfaz funciona en modo DEMO por texto sin contratar servicios. El modo LIVE es una integración
+propuesta y codificada, no un resultado experimental validado. No publicar credenciales.
 
 ## 2. Requisitos e instalación (uv recomendado)
 

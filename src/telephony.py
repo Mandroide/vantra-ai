@@ -1,0 +1,276 @@
+"""Piloto saliente REAL solo a destinatarios dominicanos preautorizados.
+
+Controles: lista positiva en entorno + consentimiento verificable externamente,
+exclusión permanente, horario local, una llamada simultánea y límite diario.
+Los números nunca se guardan en SQLite (solo HMAC irreversible).
+"""
+from __future__ import annotations
+
+import base64
+from contextlib import closing
+from datetime import datetime
+import hashlib
+import hmac
+import os
+import re
+import secrets
+import sqlite3
+import time
+from urllib.parse import urlparse
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+import requests
+
+from src.config import env, key
+from src.storage import DB
+
+DO_NUMBER = re.compile(r'^\+1(?:809|829|849)\d{7}$')
+CALL_SID = re.compile(r'^CA[a-zA-Z0-9]{32}$')
+TZ = ZoneInfo('America/Santo_Domingo')
+TERMINAL = {'completed', 'busy', 'failed', 'no-answer', 'canceled', 'rejected', 'error'}
+
+
+class CallPolicyError(ValueError):
+    pass
+
+
+def normalize_do_phone(phone: str) -> str:
+    """Solo +1809/+1829/+1849 seguido de 7 dígitos; no normalizar entradas ambiguas."""
+    candidate = (phone or '').strip()
+    if not DO_NUMBER.fullmatch(candidate):
+        raise CallPolicyError('Número inválido: use E.164 dominicano (+1809, +1829 o +1849 y 7 dígitos).')
+    return candidate
+
+
+def _phone_hash(phone: str) -> str:
+    return hmac.new(key('TWILIO_AUTH_TOKEN').encode(), phone.encode(), hashlib.sha256).hexdigest()
+
+
+def _conn():
+    DB.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(DB, timeout=20, isolation_level=None)
+    c.execute('PRAGMA busy_timeout=20000')
+    c.execute('''CREATE TABLE IF NOT EXISTS phone_calls (
+        id TEXT PRIMARY KEY, nonce TEXT NOT NULL, phone_hash TEXT NOT NULL,
+        call_sid TEXT UNIQUE, status TEXT NOT NULL, created_utc INTEGER NOT NULL,
+        updated_utc INTEGER NOT NULL)''')
+    c.execute('CREATE INDEX IF NOT EXISTS calls_when ON phone_calls(created_utc)')
+    c.execute('CREATE TABLE IF NOT EXISTS phone_dnc(phone_hash TEXT PRIMARY KEY, added_utc INTEGER NOT NULL)')
+    return c
+
+
+def get_call(call_id: str) -> dict | None:
+    if not re.fullmatch('[0-9a-f]{32}', call_id or ''):
+        return None
+    with closing(_conn()) as c:
+        r = c.execute('SELECT id,call_sid,status,created_utc FROM phone_calls WHERE id=?', (call_id,)).fetchone()
+    return dict(zip(('id', 'call_sid', 'status', 'created_utc'), r)) if r else None
+
+
+def get_call_by_sid(sid: str) -> dict | None:
+    if not CALL_SID.fullmatch(sid or ''):
+        return None
+    with closing(_conn()) as c:
+        r = c.execute('SELECT id,call_sid,status FROM phone_calls WHERE call_sid=?', (sid,)).fetchone()
+    return dict(zip(('id', 'call_sid', 'status'), r)) if r else None
+
+
+def _allowed_now() -> bool:
+    local = datetime.now(TZ)
+    # Lunes a viernes, 09:00-17:59 local. No sustituye cumplimiento regulatorio.
+    return local.weekday() < 5 and 9 <= local.hour < 18
+
+
+def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
+    number = normalize_do_phone(phone)
+    if env('TWILIO_CALLS_ENABLED', 'false').lower() != 'true':
+        raise CallPolicyError('Llamadas reales desactivadas; TWILIO_CALLS_ENABLED=false.')
+    if env('VANTRA_MODE', 'DEMO').upper() != 'LIVE':
+        raise CallPolicyError('Active VANTRA_MODE=LIVE para llamadas reales.')
+    if confirmed is not True:
+        raise CallPolicyError('Confirme el consentimiento previo documentado para este número.')
+    allowlist = {p.strip() for p in env('TWILIO_TEST_NUMBERS').split(',') if p.strip()}
+    if number not in allowlist:
+        raise CallPolicyError('Número no autorizado: agréguelo a TWILIO_TEST_NUMBERS tras obtener consentimiento.')
+    if check_time and not _allowed_now():
+        raise CallPolicyError('Fuera del horario de pruebas: lunes a viernes, 09:00–17:59 (Santo Domingo).')
+    for field in ('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+                  'TWILIO_PUBLIC_BASE_URL', 'DEEPGRAM_API_KEY', 'AZURE_SPEECH_KEY',
+                  'AZURE_SPEECH_REGION', 'ANTHROPIC_API_KEY'):
+        key(field)
+    if not re.fullmatch(r'AC[a-zA-Z0-9]{32}', env('TWILIO_ACCOUNT_SID')):
+        raise CallPolicyError('TWILIO_ACCOUNT_SID no tiene un formato válido.')
+    base = env('TWILIO_PUBLIC_BASE_URL')
+    parsed = urlparse(base)
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.query or parsed.fragment
+            or parsed.path not in ('', '/') or parsed.username or parsed.password):
+        raise CallPolicyError('TWILIO_PUBLIC_BASE_URL debe ser una URL HTTPS pública, sin ruta.')
+    if not re.fullmatch(r'\+[1-9]\d{6,14}', env('TWILIO_FROM_NUMBER')):
+        raise CallPolicyError('TWILIO_FROM_NUMBER debe ser E.164 válido y autorizado en Twilio.')
+    return number
+
+
+def _reserve(phone: str) -> tuple[str, str]:
+    now = int(time.time())
+    today = datetime.now(TZ).date()
+    # Medianoche dominicana traducida a timestamp UTC.
+    start_today = int(datetime.combine(today, datetime.min.time(), tzinfo=TZ).timestamp())
+    number_hash = _phone_hash(phone)
+    with closing(_conn()) as c:
+        try:
+            c.execute('BEGIN IMMEDIATE')
+            if c.execute('SELECT 1 FROM phone_dnc WHERE phone_hash=?', (number_hash,)).fetchone():
+                raise CallPolicyError('Este número pidió no recibir más llamadas (DNC).')
+            active = c.execute("SELECT COUNT(*) FROM phone_calls WHERE status IN ('reserved','queued','initiated','ringing','in-progress')").fetchone()[0]
+            if active >= 1:
+                raise CallPolicyError('Existe otra llamada en curso. Solo se permite una simultánea.')
+            n = c.execute('SELECT COUNT(*) FROM phone_calls WHERE created_utc>=?', (start_today,)).fetchone()[0]
+            if n >= 3:
+                raise CallPolicyError('Límite diario de piloto alcanzado (3 llamadas).')
+            call_id, nonce = uuid4().hex, secrets.token_urlsafe(32)
+            c.execute('INSERT INTO phone_calls VALUES (?,?,?,?,?,?,?)',
+                      (call_id, nonce, number_hash, None, 'reserved', now, now))
+            c.execute('COMMIT')
+            return call_id, nonce
+        except BaseException:
+            c.execute('ROLLBACK')
+            raise
+
+
+def update_call(call_id: str, status: str, sid: str | None = None) -> None:
+    if status not in TERMINAL | {'reserved', 'queued', 'initiated', 'ringing', 'in-progress'}:
+        raise ValueError('Estado telefónico inválido')
+    with closing(_conn()) as c:
+        with c:
+            current = c.execute('SELECT status FROM phone_calls WHERE id=?', (call_id,)).fetchone()
+            if not current or current[0] in TERMINAL:
+                return
+            progression = {'reserved': 0, 'queued': 1, 'initiated': 2, 'ringing': 3, 'in-progress': 4}
+            if progression.get(status, 10) < progression.get(current[0], 10):
+                return
+            if sid is None:
+                c.execute('UPDATE phone_calls SET status=?, updated_utc=? WHERE id=?',
+                          (status, int(time.time()), call_id))
+            else:
+                if not CALL_SID.fullmatch(sid):
+                    raise ValueError('Call SID inválido')
+                # No se sobrescribe SID; race webhook-media y creación puede ocurrir.
+                c.execute('''UPDATE phone_calls SET status=?, call_sid=COALESCE(call_sid, ?), updated_utc=?
+                             WHERE id=? AND (call_sid IS NULL OR call_sid=?)''',
+                          (status, sid, int(time.time()), call_id, sid))
+
+
+def claim_stream(call_id: str, nonce: str, sid: str) -> bool:
+    if not re.fullmatch('[0-9a-f]{32}', call_id or '') or not CALL_SID.fullmatch(sid or ''):
+        return False
+    with closing(_conn()) as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT nonce,status,call_sid FROM phone_calls WHERE id=?', (call_id,)).fetchone()
+        valid = bool(row and hmac.compare_digest(row[0], nonce or '')
+                     and row[1] not in TERMINAL and (row[2] is None or row[2] == sid))
+        if valid:
+            c.execute("UPDATE phone_calls SET status='in-progress', call_sid=?, updated_utc=? WHERE id=?",
+                      (sid, int(time.time()), call_id))
+        c.execute('COMMIT')
+        return valid
+
+
+def add_do_not_call(phone: str) -> None:
+    """Permite a un operador excluir un número autorizado sin realizar llamadas."""
+    number = normalize_do_phone(phone)
+    with closing(_conn()) as c:
+        with c:
+            c.execute('INSERT OR IGNORE INTO phone_dnc(phone_hash,added_utc) VALUES (?,?)',
+                      (_phone_hash(number), int(time.time())))
+
+
+def mark_do_not_call(call_id: str) -> None:
+    with closing(_conn()) as c:
+        with c:
+            c.execute('''INSERT OR IGNORE INTO phone_dnc(phone_hash,added_utc)
+                         SELECT phone_hash, ? FROM phone_calls WHERE id=?''',
+                      (int(time.time()), call_id))
+
+
+def twilio_valid_signature(url: str, signature: str, params: dict[str, str] | None = None) -> bool:
+    """Implementación del HMAC-SHA1 documentado por Twilio (comparación segura)."""
+    if not signature:
+        return False
+    suffix = ''.join(str(k) + str(v) for k, v in sorted((params or {}).items()))
+    content = (url + suffix).encode()
+    expected = base64.b64encode(hmac.new(key('TWILIO_AUTH_TOKEN').encode(), content,
+                                         hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(expected, signature)
+
+
+def public_url(path: str) -> str:
+    return env('TWILIO_PUBLIC_BASE_URL').rstrip('/') + path
+
+
+def twiml_for_stream(call_id: str, nonce: str) -> str:
+    from xml.sax.saxutils import escape
+    stream_url = public_url('/twilio/media').replace('https://', 'wss://', 1)
+    return (f'<?xml version="1.0" encoding="UTF-8"?><Response>'
+            f'<Connect><Stream url="{escape(stream_url)}">'
+            f'<Parameter name="call_id" value="{escape(call_id)}"/>'
+            f'<Parameter name="nonce" value="{escape(nonce)}"/>'
+            f'</Stream></Connect><Hangup/></Response>')
+
+
+def start_test_call(phone: str, confirmed: bool, *, transport=None) -> dict:
+    """Realiza UNA llamada real únicamente tras lista positiva, opt-in y controles.
+
+    transport se inyecta únicamente para pruebas sin acceso a Twilio.
+    """
+    number = _preflight(phone, confirmed)
+    call_id, nonce = _reserve(number)
+    twiml = twiml_for_stream(call_id, nonce)
+    sid = env('TWILIO_ACCOUNT_SID')
+    endpoint = f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json'
+    form = {
+        'To': number, 'From': env('TWILIO_FROM_NUMBER'), 'Twiml': twiml,
+        'StatusCallback': public_url('/twilio/status'),
+        'StatusCallbackMethod': 'POST',
+        'StatusCallbackEvent': ['initiated', 'ringing', 'answered', 'completed'],
+        'TimeLimit': '180',
+    }
+    sender = transport or requests.post
+    try:
+        response = sender(endpoint, data=form, auth=(sid, key('TWILIO_AUTH_TOKEN')), timeout=20)
+        response.raise_for_status()
+        result = response.json()
+        returned_sid = result['sid']
+        if not CALL_SID.fullmatch(returned_sid):
+            raise ValueError('Respuesta de Twilio sin SID válido')
+        update_call(call_id, 'queued', returned_sid)
+        return {'id': call_id, 'call_sid': returned_sid, 'status': 'queued',
+                'message': 'Solicitud de llamada enviada a Twilio; aún no confirma que haya contestado.'}
+    except requests.exceptions.Timeout as exc:
+        # Una solicitud con timeout puede haber sido aceptada por Twilio.
+        # Bloquear más llamadas hasta comprobar manualmente la consola.
+        update_call(call_id, 'initiated')
+        raise CallPolicyError('La solicitud expiró sin confirmación. NO repita: revise primero la consola de Twilio.') from exc
+    except Exception:
+        update_call(call_id, 'error')
+        raise
+
+
+def stop_test_call(call_id: str, *, transport=None) -> dict:
+    info = get_call(call_id)
+    if not info:
+        raise CallPolicyError('Llamada no encontrada')
+    if info['status'] in TERMINAL:
+        return {'status': info['status'], 'id': call_id}
+    if not info['call_sid']:
+        update_call(call_id, 'canceled')
+        return {'status': 'canceled', 'id': call_id}
+    sid = env('TWILIO_ACCOUNT_SID')
+    endpoint = (f'https://api.twilio.com/2010-04-01/Accounts/{sid}'
+                f'/Calls/{info["call_sid"]}.json')
+    sender = transport or requests.post
+    response = sender(endpoint, data={'Status': 'completed'},
+                      auth=(sid, key('TWILIO_AUTH_TOKEN')), timeout=20)
+    response.raise_for_status()
+    update_call(call_id, 'completed')
+    return {'status': 'completed', 'id': call_id}

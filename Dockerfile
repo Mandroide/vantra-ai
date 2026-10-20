@@ -27,7 +27,8 @@ ENV PYTHONUNBUFFERED=1 \
     HOME=/tmp \
     PORT=7860 \
     VANTRA_MODE=DEMO
-RUN groupadd --system vantra && useradd --system --gid vantra --home-dir /tmp vantra
+RUN groupadd --system vantra && useradd --system --gid vantra --home-dir /tmp vantra \
+    && mkdir -p /state && chown -R vantra:vantra /state
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=vantra:vantra app.py ./app.py

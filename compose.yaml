@@ -17,9 +17,54 @@ services:
       AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-}
       AZURE_SPEECH_VOICE: ${AZURE_SPEECH_VOICE:-es-DO-RamonaNeural}
       ENABLE_LOCAL_TTS: "false"
+      TWILIO_CALLS_ENABLED: ${TWILIO_CALLS_ENABLED:-false}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      TWILIO_PUBLIC_BASE_URL: ${TWILIO_PUBLIC_BASE_URL:-}
+      TWILIO_TEST_NUMBERS: ${TWILIO_TEST_NUMBERS:-}
+      VANTRA_DB_PATH: /state/vantra.sqlite3
+    volumes:
+      - vantra_state:/state
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     pids_limit: 128
     # El puerto se enlaza solo a localhost. Nunca exponga LIVE sin autenticación y límites.
+
+  twilio-webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vantra-ai:mvp
+    init: true
+    command: [ "python", "-m", "uvicorn", "src.telephony_server:app", "--host", "0.0.0.0", "--port", "8000" ]
+    ports:
+      - "127.0.0.1:${TWILIO_WEBHOOK_PORT:-8000}:8000"
+    environment:
+      VANTRA_MODE: ${VANTRA_MODE:-DEMO}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-}
+      AZURE_SPEECH_VOICE: ${AZURE_SPEECH_VOICE:-es-DO-RamonaNeural}
+      TWILIO_CALLS_ENABLED: ${TWILIO_CALLS_ENABLED:-false}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      TWILIO_PUBLIC_BASE_URL: ${TWILIO_PUBLIC_BASE_URL:-}
+      TWILIO_TEST_NUMBERS: ${TWILIO_TEST_NUMBERS:-}
+      VANTRA_DB_PATH: /state/vantra.sqlite3
+    volumes:
+      - vantra_state:/state
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
+volumes:
+  vantra_state:
