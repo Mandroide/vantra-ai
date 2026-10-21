@@ -51,10 +51,36 @@ def _conn():
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB, timeout=20, isolation_level=None)
     c.execute('PRAGMA busy_timeout=20000')
-    c.execute('''CREATE TABLE IF NOT EXISTS phone_calls (
-        id TEXT PRIMARY KEY, nonce TEXT NOT NULL, phone_hash TEXT NOT NULL,
-        call_sid TEXT UNIQUE, status TEXT NOT NULL, created_utc INTEGER NOT NULL,
-        updated_utc INTEGER NOT NULL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS phone_calls
+                 (
+                     id
+                     TEXT
+                     PRIMARY
+                     KEY,
+                     nonce
+                     TEXT
+                     NOT
+                     NULL,
+                     phone_hash
+                     TEXT
+                     NOT
+                     NULL,
+                     call_sid
+                     TEXT
+                     UNIQUE,
+                     status
+                     TEXT
+                     NOT
+                     NULL,
+                     created_utc
+                     INTEGER
+                     NOT
+                     NULL,
+                     updated_utc
+                     INTEGER
+                     NOT
+                     NULL
+                 )''')
     c.execute('CREATE INDEX IF NOT EXISTS calls_when ON phone_calls(created_utc)')
     c.execute('CREATE TABLE IF NOT EXISTS phone_dnc(phone_hash TEXT PRIMARY KEY, added_utc INTEGER NOT NULL)')
     return c
@@ -104,7 +130,7 @@ def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
     base = env('TWILIO_PUBLIC_BASE_URL')
     parsed = urlparse(base)
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.query or parsed.fragment
-            or parsed.path not in ('', '/') or parsed.username or parsed.password):
+        or parsed.path not in ('', '/') or parsed.username or parsed.password):
         raise CallPolicyError('TWILIO_PUBLIC_BASE_URL debe ser una URL HTTPS pública, sin ruta.')
     if not re.fullmatch(r'\+[1-9]\d{6,14}', env('TWILIO_FROM_NUMBER')):
         raise CallPolicyError('TWILIO_FROM_NUMBER debe ser E.164 válido y autorizado en Twilio.')
@@ -122,7 +148,9 @@ def _reserve(phone: str) -> tuple[str, str]:
             c.execute('BEGIN IMMEDIATE')
             if c.execute('SELECT 1 FROM phone_dnc WHERE phone_hash=?', (number_hash,)).fetchone():
                 raise CallPolicyError('Este número pidió no recibir más llamadas (DNC).')
-            active = c.execute("SELECT COUNT(*) FROM phone_calls WHERE status IN ('reserved','queued','initiated','ringing','in-progress')").fetchone()[0]
+            active = c.execute(
+                "SELECT COUNT(*) FROM phone_calls WHERE status IN ('reserved','queued','initiated','ringing','in-progress')").fetchone()[
+                0]
             if active >= 1:
                 raise CallPolicyError('Existe otra llamada en curso. Solo se permite una simultánea.')
             n = c.execute('SELECT COUNT(*) FROM phone_calls WHERE created_utc>=?', (start_today,)).fetchone()[0]
@@ -156,8 +184,12 @@ def update_call(call_id: str, status: str, sid: str | None = None) -> None:
                 if not CALL_SID.fullmatch(sid):
                     raise ValueError('Call SID inválido')
                 # No se sobrescribe SID; race webhook-media y creación puede ocurrir.
-                c.execute('''UPDATE phone_calls SET status=?, call_sid=COALESCE(call_sid, ?), updated_utc=?
-                             WHERE id=? AND (call_sid IS NULL OR call_sid=?)''',
+                c.execute('''UPDATE phone_calls
+                             SET status=?,
+                                 call_sid=COALESCE(call_sid, ?),
+                                 updated_utc=?
+                             WHERE id = ?
+                               AND (call_sid IS NULL OR call_sid = ?)''',
                           (status, sid, int(time.time()), call_id, sid))
 
 
@@ -188,8 +220,11 @@ def add_do_not_call(phone: str) -> None:
 def mark_do_not_call(call_id: str) -> None:
     with closing(_conn()) as c:
         with c:
-            c.execute('''INSERT OR IGNORE INTO phone_dnc(phone_hash,added_utc)
-                         SELECT phone_hash, ? FROM phone_calls WHERE id=?''',
+            c.execute('''INSERT
+            OR IGNORE INTO phone_dnc(phone_hash,added_utc)
+            SELECT phone_hash, ?
+            FROM phone_calls
+            WHERE id = ?''',
                       (int(time.time()), call_id))
 
 
@@ -216,6 +251,49 @@ def twiml_for_stream(call_id: str, nonce: str) -> str:
             f'<Parameter name="call_id" value="{escape(call_id)}"/>'
             f'<Parameter name="nonce" value="{escape(nonce)}"/>'
             f'</Stream></Connect><Hangup/></Response>')
+
+
+def summarize_twilio_http_error(exc: requests.exceptions.HTTPError) -> str:
+    """Diagnóstico breve sin mostrar teléfonos, tokens ni mensajes sin depurar del proveedor."""
+    response = exc.response
+    status = response.status_code if response is not None else None
+    error_code = None
+    if response is not None:
+        try:
+            payload = response.json()
+            candidate = payload.get('code') if isinstance(payload, dict) else None
+            if str(candidate).isdigit() and 10000 <= int(candidate) <= 99999:
+                error_code = int(candidate)
+        except (ValueError, TypeError):
+            pass
+
+    advice = {
+        10001: 'Compruebe que la cuenta Twilio esté activa.',
+        10002: 'La funcionalidad no está disponible para la cuenta Trial.',
+        20003: 'Verifique Account SID y Auth Token del mismo proyecto.',
+        21203: 'Revise la habilitación de llamadas internacionales.',
+        21210: 'El número de origen no está verificado para esta cuenta.',
+        21211: 'Twilio considera inválido el número de destino.',
+        21212: 'Revise TWILIO_FROM_NUMBER y su autorización para llamadas salientes.',
+        21214: 'Twilio no puede completar el enrutamiento hacia ese destino.',
+        21215: 'Active República Dominicana en Voice Geographic Permissions si la cuenta lo permite.',
+        21216: 'Twilio bloqueó la ruta o la llamada; revise los controles de la cuenta.',
+        21217: 'Revise el número telefónico y su formato internacional.',
+        21219: 'La cuenta requiere verificar previamente el número de destino.',
+    }
+    reason = advice.get(error_code)
+    if not reason:
+        if status == 401:
+            reason = 'Revise la autenticación Twilio (Account SID y Auth Token).'
+        elif status == 403:
+            reason = 'Revise el estado y las restricciones de la cuenta Twilio.'
+        else:
+            reason = 'Revise el código en Twilio Console > Monitor > Debugger.'
+
+    detail = f'HTTP {status}' if status is not None else 'HTTP desconocido'
+    if error_code is not None:
+        detail += f', código Twilio {error_code}'
+    return f'Twilio rechazó la solicitud ({detail}). {reason} No reintente sin verificar el motivo.'
 
 
 def start_test_call(phone: str, confirmed: bool, *, transport=None) -> dict:
@@ -250,7 +328,8 @@ def start_test_call(phone: str, confirmed: bool, *, transport=None) -> dict:
         # Una solicitud con timeout puede haber sido aceptada por Twilio.
         # Bloquear más llamadas hasta comprobar manualmente la consola.
         update_call(call_id, 'initiated')
-        raise CallPolicyError('La solicitud expiró sin confirmación. NO repita: revise primero la consola de Twilio.') from exc
+        raise CallPolicyError(
+            'La solicitud expiró sin confirmación. NO repita: revise primero la consola de Twilio.') from exc
     except Exception:
         update_call(call_id, 'error')
         raise

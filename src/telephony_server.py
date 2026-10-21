@@ -106,7 +106,7 @@ class CallBridge:
             for i in range(0, len(raw), 1600):
                 await self.websocket.send_json({
                     'event': 'media', 'streamSid': self.stream_sid,
-                    'media': {'payload': base64.b64encode(raw[i:i+1600]).decode('ascii')}})
+                    'media': {'payload': base64.b64encode(raw[i:i + 1600]).decode('ascii')}})
             self.hang_after_mark = goodbye
             await self.websocket.send_json({
                 'event': 'mark', 'streamSid': self.stream_sid,

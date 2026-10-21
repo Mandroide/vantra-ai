@@ -5,16 +5,16 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels: ["dependencies", "python"]
+    labels: [ "dependencies", "python" ]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels: ["dependencies", "ci"]
+    labels: [ "dependencies", "ci" ]
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels: ["dependencies", "quality"]
+    labels: [ "dependencies", "quality" ]

@@ -180,3 +180,11 @@ y [guion de presentación](docs/demo_script.md).
 Para completar la Fase 2 sigue pendiente generar `uv.lock`, publicar el repositorio y recopilar **evidencias verificadas
 de integraciones LIVE** (incluida una llamada consentida si es viable) antes de describirlas como operativas. La
 documentación y las pruebas offline no sustituyen esa validación.
+
+### Diagnóstico de errores Twilio (HTTPError)
+
+Si la interfaz muestra que Twilio rechazó una llamada, anote solo el **estado HTTP** y el **código numérico Twilio**
+mostrados, sin enviar números completos ni credenciales.
+Consulte [solución de problemas](docs/troubleshooting.md#error-al-iniciar-llamada-twilio-no-pudo-iniciar-llamada-httperror).
+En cuentas Trial, los verbos `<Stream>` están bloqueados y pueden existir restricciones adicionales para
+`Create a Call`; la telefonía bidireccional requiere capacidades habilitadas en la cuenta.

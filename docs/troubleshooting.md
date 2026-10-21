@@ -64,3 +64,25 @@ del log. Si se trata de una llamada, confirme si Twilio llegó a crear un `CallS
 innecesariamente).
 
 Referencias: [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), [error 31920](https://www.twilio.com/docs/api/errors/31920), [Docker Compose](https://docs.docker.com/compose/), [ngrok](https://ngrok.com/docs/).
+
+## Error al iniciar llamada: `Twilio no pudo iniciar llamada (HTTPError)`
+
+El mensaje de versiones anteriores de la interfaz era genérico. **No significa por sí mismo** que falten fondos: la
+respuesta HTTP puede indicar autenticación, permisos geográficos, remitente inválido, número de destino no verificado o
+restricciones Trial. El código ahora muestra **HTTP y código numérico de Twilio**, nunca la respuesta textual íntegra
+que podría contener números.
+
+1. En Twilio Console, consulte **Monitor → Debugger** y, si existe un registro, los **Voice Call Logs**. Si no se creó
+   `CallSid`, podría no aparecer entre las llamadas iniciadas.
+2. Consulte el valor `HTTP NNN, código Twilio XXXXX` en la pestaña *Llamada REAL* de Gradio.
+3. Interprete las incidencias más habituales: `21215` (Geo Permissions), `21219` (destino no verificado), `21212`
+   (origen inválido), `21210` (origen no verificado), `20003` (autenticación), `10002` (función restringida a Trial).
+4. Si la cuenta es **Trial**, consulte [Try out Twilio Voice](https://www.twilio.com/docs/usage/trials/try-out-voice):
+   la creación de llamadas mediante API admite parámetros limitados; además, **`<Stream>` está bloqueado** en TwiML
+   personalizado durante Trial. El flujo bidireccional que usa Vantra AI requiere una cuenta que permita Media Streams.
+   No se arregla modificando ngrok ni cambiando a LIVE.
+5. Evite repetir la llamada hasta confirmar el motivo; cada intento puede consumir una cuota diaria del piloto. Si
+   `HTTPError` apareció, la API no aceptó la solicitud como éxito.
+
+Nunca copie claves, Auth Tokens, números completos ni el cuerpo íntegro de la respuesta HTTP en capturas públicas o
+chats.

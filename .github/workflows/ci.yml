@@ -3,7 +3,7 @@ name: Vantra AI · CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: [ "3.11", "3.12" ]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
       VANTRA_MODE: DEMO

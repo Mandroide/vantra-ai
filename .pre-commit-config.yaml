@@ -15,12 +15,12 @@ repos:
         name: Ruff lint con correcciones automáticas
         entry: uv run --no-sync ruff check --fix
         language: system
-        types_or: [python, pyi]
+        types_or: [ python, pyi ]
       - id: ruff-format
         name: Ruff format
         entry: uv run --no-sync ruff format
         language: system
-        types_or: [python, pyi]
+        types_or: [ python, pyi ]
       - id: vantra-secret-check
         name: Validación adicional de secretos y artefactos sensibles
         entry: uv run --no-sync python scripts/check_secrets.py

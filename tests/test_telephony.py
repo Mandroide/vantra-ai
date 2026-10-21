@@ -91,10 +91,12 @@ def test_call_create_and_hangup_offline(configured):
     assert ALLOW not in phone.DB.read_bytes().decode('utf-8', errors='ignore')
     with pytest.raises(phone.CallPolicyError, match='otra llamada'):
         phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
     def fake_stop(url, **kwargs):
         assert url.endswith(SID + '.json')
         assert kwargs['data']['Status'] == 'completed'
         return FakeResponse()
+
     stopped = phone.stop_test_call(created['id'], transport=fake_stop)
     assert stopped['status'] == 'completed'
     assert phone.get_call(created['id'])['status'] == 'completed'
@@ -121,7 +123,7 @@ def test_status_callback_signature_required(configured):
     assert response.status_code == 403
     sig = phone.twilio_valid_signature
     assert not sig(phone.public_url('/twilio/status'), 'random', data)
-    source = phone.public_url('/twilio/status') + ''.join(k+v for k,v in sorted(data.items()))
+    source = phone.public_url('/twilio/status') + ''.join(k + v for k, v in sorted(data.items()))
     signature = base64.b64encode(hmac.new(b'test-only-auth-token', source.encode(), hashlib.sha1).digest()).decode()
     assert sig(phone.public_url('/twilio/status'), signature, data)
     valid = client.post('/twilio/status', data=data, headers={'X-Twilio-Signature': signature})
@@ -138,10 +140,12 @@ def test_stream_signature_rejects_missing(configured):
 def test_raw_mulaw_sent_without_container(configured, monkeypatch):
     class WebSocketMock:
         def __init__(self): self.messages = []
+
         async def send_json(self, item): self.messages.append(item)
+
     monkeypatch.setattr(server, 'azure_mulaw_8k', lambda text: b'\xff' * 3200)
     ws = WebSocketMock()
-    bridge = server.CallBridge(ws, 'a'*32, SID, 'MZ'+'9'*32)
+    bridge = server.CallBridge(ws, 'a' * 32, SID, 'MZ' + '9' * 32)
     asyncio.run(bridge._send_audio('Hola'))
     medias = [v for v in ws.messages if v['event'] == 'media']
     assert len(medias) == 2
@@ -158,8 +162,10 @@ def test_websocket_can_claim_valid_session(configured, monkeypatch):
     created = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
     with closing(phone._conn()) as db:
         nonce = db.execute('SELECT nonce FROM phone_calls WHERE id=?', (created['id'],)).fetchone()[0]
+
     async def fake_bridge(self):
         await self.websocket.send_json({'test': 'accepted'})
+
     monkeypatch.setattr(server.CallBridge, 'run', fake_bridge)
     url = phone.public_url('/twilio/media').replace('https://', 'wss://', 1)
     source = hmac.new(b'test-only-auth-token', url.encode(), hashlib.sha1).digest()
@@ -168,7 +174,7 @@ def test_websocket_can_claim_valid_session(configured, monkeypatch):
         with client.websocket_connect('/twilio/media', headers={'X-Twilio-Signature': signature}) as ws:
             ws.send_json({'event': 'connected'})
             ws.send_json({'event': 'start', 'start': {
-                'callSid': SID, 'streamSid': 'MZ' + '9'*32,
+                'callSid': SID, 'streamSid': 'MZ' + '9' * 32,
                 'customParameters': {'call_id': created['id'], 'nonce': nonce}}})
             assert ws.receive_json() == {'test': 'accepted'}
 
@@ -189,7 +195,50 @@ def test_ambiguous_twilio_timeout_fails_closed(configured):
     import requests
     def uncertain(url, **kwargs):
         raise requests.exceptions.ReadTimeout('simulated timeout')
+
     with pytest.raises(phone.CallPolicyError, match='NO repita'):
         phone.start_test_call(ALLOW, confirmed=True, transport=uncertain)
     with pytest.raises(phone.CallPolicyError, match='otra llamada'):
         phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+
+def test_twilio_http_error_exposes_safe_code(configured):
+    import requests
+    response = requests.Response()
+    response.status_code = 400
+    response._content = json.dumps({
+        'code': 21215,
+        'message': 'Cannot call +18091234567; token=top-secret',
+    }).encode()
+    error = requests.exceptions.HTTPError('400 Client Error', response=response)
+    description = phone.summarize_twilio_http_error(error)
+    assert 'HTTP 400' in description
+    assert '21215' in description
+    assert 'República Dominicana' in description
+    assert '+18091234567' not in description
+    assert 'top-secret' not in description
+
+
+def test_twilio_trial_error_hint(configured):
+    import requests
+    response = requests.Response()
+    response.status_code = 400
+    response._content = b'{"code": 10002, "message": "Feature not available"}'
+    error = requests.exceptions.HTTPError('bad request', response=response)
+    assert 'Trial' in phone.summarize_twilio_http_error(error)
+
+
+def test_twilio_http_error_without_json_or_response(configured):
+    import requests
+    response = requests.Response()
+    response.status_code = 401
+    response._content = b'<html>Denied</html>'
+    error = requests.exceptions.HTTPError('Denied', response=response)
+    msg = phone.summarize_twilio_http_error(error)
+    assert 'HTTP 401' in msg
+    assert 'autenticación' in msg
+    assert 'Denied' not in msg
+    no_response = requests.exceptions.HTTPError('denied token abc')
+    msg = phone.summarize_twilio_http_error(no_response)
+    assert 'desconocido' in msg
+    assert 'abc' not in msg

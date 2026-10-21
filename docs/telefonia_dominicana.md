@@ -142,12 +142,9 @@ garantiza entrega a todos los operadores del país.
 - Twilio, [mensajes WebSocket (μ-law 8000)](https://www.twilio.com/docs/voice/media-streams/websocket-messages).
 - Twilio, [crear llamadas salientes](https://www.twilio.com/docs/voice/api/call-resource).
 -
-
 Twilio, [guía de llamadas para República Dominicana](https://www.twilio.com/en-us/guidelines/do/dominican-republic--voice-guidelines---twilio).
-
 - Twilio, [restricciones de cuenta trial](https://www.twilio.com/docs/usage/trials/try-out-voice).
 - Twilio, [validación de firma](https://www.twilio.com/docs/usage/security).
 - Deepgram, [streaming STT](https://developers.deepgram.com/reference/speech-to-text/listen-streaming).
 -
-
 Microsoft, [Azure TTS formatos de audio](https://learn.microsoft.com/en-us/azure/cognitive-services/speech-service/rest-text-to-speech).

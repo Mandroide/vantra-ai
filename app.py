@@ -1,12 +1,14 @@
 """Interfaz Gradio; ejecutar: python app.py"""
 import os, time
+import requests
 import gradio as gr
 from src.agent import respond, Session
 from src.config import env
 from src.speech import transcribe_deepgram, speak_azure, speak_local
 from src.storage import counts
 from src.tools import check_contact_policy
-from src.telephony import start_test_call, stop_test_call, get_call, add_do_not_call, CallPolicyError
+from src.telephony import start_test_call, stop_test_call, get_call, add_do_not_call, CallPolicyError, \
+    summarize_twilio_http_error
 
 LIVE = env('VANTRA_MODE', 'DEMO').upper() == 'LIVE'
 
@@ -81,6 +83,8 @@ def call_real(number, prior_consent, authorized_recipient):
         result['id']
     except (CallPolicyError, RuntimeError) as exc:
         return f'Bloqueado: {exc}', ''
+    except requests.exceptions.HTTPError as exc:
+        return summarize_twilio_http_error(exc), ''
     except Exception as exc:
         return f'Twilio no pudo iniciar llamada ({type(exc).__name__}). Revise facturación, número origen y permisos geográficos.', ''
 
