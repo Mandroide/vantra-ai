@@ -1,5 +1,8 @@
 # Ingeniería de software y DevOps — Vantra AI
 
+> **Instalación guiada desde
+PyCharm:** [Inicio](getting-started.md) → [Docker](docker-deployment.md) → [Variables](configuration.md).
+
 ## Decisiones
 
 Se incorpora **uv, Ruff, pre-commit, Pytest + cobertura, Docker/Compose, GitHub Actions y Dependabot**. Jenkins se
