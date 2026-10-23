@@ -1,190 +1,148 @@
-# Vantra AI — Agente de voz bancario (MVP académico)
+# Vantra AI
 
-**UASD · Maestría en Ciencia de Datos e Inteligencia Artificial · Capstone Projects, Fase 2**  
-**Caso de uso:** Banco Demo **ficticio**, tarjetas, préstamos y certificados.  
-**Estado:** DEMO por texto ejecutable; conectores LIVE y telefonía Twilio codificados, **pendientes de validación real
-extremo a extremo**. No es una aplicación bancaria de producción.
+**Agente conversacional de voz para un banco ficticio · MVP académico**  
+Universidad Autónoma de Santo Domingo (UASD) · Maestría en Ciencia de Datos e Inteligencia Artificial · Capstone
+Projects, Fase 2.
 
-> **Manual
-completo:** [Instalación y despliegue con PyCharm, Docker, ngrok y Twilio](MANUAL_INSTALACION_Y_DESPLIEGUE.md).  
-> **Empiece por
-aquí:** [Guía de instalación PyCharm + Docker](docs/getting-started.md) → [Configuración de claves](docs/configuration.md) → [Twilio](docs/twilio-setup.md) → [ngrok](docs/ngrok-setup.md) → [Primera llamada](docs/first-call.md).  
-> Todas las guías: **[Índice de documentación](docs/README.md)**.
+Vantra AI permite consultar productos bancarios ficticios, calcular cuotas con funciones deterministas, registrar
+prospectos de prueba y simular derivaciones. Ofrece una interfaz web con Gradio y adaptadores para reconocimiento de
+voz, modelo de lenguaje y síntesis de audio. Incluye un **piloto restringido de llamadas salientes a números dominicanos
+previamente autorizados** con Twilio.
 
-## 1. Qué hace el proyecto
+> **Estado de validación:** las pruebas de lógica y escenarios sintéticos se pueden ejecutar sin credenciales. La
+> integración completa con Deepgram, Claude, Azure Speech y Twilio **requiere una validación de extremo a extremo con
+cuentas reales**. No hay conexiones con bancos reales, transferencias humanas operativas ni autorización para utilizarlo
+> comercialmente.
 
-- **DEMO sin credenciales:** consultas bancarias por texto, catálogo ficticio, cálculo de cuotas, prospectos,
-  solicitudes de devolución de llamada, derivación simulada y campaña saliente **simulada**.
-- **LIVE (integraciones por validar en vivo):** Deepgram reconoce audio, Anthropic Claude interviene en consultas
-  abiertas y Azure Speech genera respuestas de voz. Muchas consultas del catálogo continúan resolviéndose con
-  herramientas deterministas.
-- **Telefonía real de piloto:** pestaña « **Llamada REAL · piloto restringido**». Código para una llamada saliente
-  manual mediante Twilio REST, FastAPI y WebSocket con audio bidireccional. **Desactivada por defecto**, limitada a
-  números de RD `+1809`, `+1829` y `+1849` explícitamente permitidos y con consentimiento documentado; no hay campañas
-  masivas ni transferencias reales.
-- **Evaluación:** pruebas unitarias offline y 36 verificaciones deterministas de escenarios. Los resultados DEMO **no**
-  acreditan reconocimiento de voz, naturalidad, costos o latencia de los proveedores.
+## Funciones
 
-## 2. Requisitos
+| Componente          | Comportamiento                                                                                                                       |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| DEMO                | Chat por texto y operaciones con datos sintéticos sin APIs externas.                                                                 |
+| LIVE                | Conectores de Deepgram (STT), Anthropic Claude (LLM, cuando la consulta lo requiere) y Azure Speech (TTS). Requiere cuentas válidas. |
+| Telefonía           | Llamada saliente **manual** mediante Twilio REST y procesamiento de audio en WebSocket. Deshabilitada de forma predeterminada.       |
+| Seguridad de piloto | Lista de destinatarios permitidos, consentimiento declarado, lista DNC, horario configurable y límites de volumen.                   |
+| Evaluación          | Pytest y 12 escenarios × 3 variantes de texto = 36 verificaciones offline.                                                           |
+| Ingeniería          | uv, Docker Compose, Ruff, pre-commit y GitHub Actions.                                                                               |
 
-- **Opción recomendada en PyCharm:** Docker Desktop con motor Linux + Docker Compose v2.
-- **Opción de desarrollo directo:** Python 3.11/3.12 + [uv](https://docs.astral.sh/uv/).
-- Acceso a Internet para instalar dependencias. Para LIVE también necesita cuentas y credenciales de proveedores,
-  facturación/cuotas y políticas de uso acordes al piloto.
+## Inicio rápido con Docker
 
-## 3. Inicio rápido en Docker (sin llamadas ni claves)
-
-Desde la **carpeta que contiene `compose.yaml`**, en la terminal de PyCharm/PowerShell:
+**Requisitos:** Docker Desktop/Engine con Compose v2, acceso a Internet para construir la imagen y terminal abierta en
+la raíz del repositorio (`compose.yaml`). PyCharm es opcional.
 
 ```powershell
+# Windows PowerShell
 Copy-Item .env.example .env
-# Mantenga VANTRA_MODE=DEMO y TWILIO_CALLS_ENABLED=false
+# Dejar VANTRA_MODE=DEMO y TWILIO_CALLS_ENABLED=false
 docker compose up -d --build
 docker compose ps
 ```
 
-Si ya tiene `.env`, no lo sobrescriba. Abra:
+En Linux/macOS use `cp .env.example .env`. **Si `.env` ya existe, no lo sobrescriba.**
 
-- **Gradio:** <http://127.0.0.1:7860>
-- **FastAPI (salud):** <http://127.0.0.1:8000/healthz>
+- Interfaz: <http://127.0.0.1:7860>
+- Salud del servidor de telefonía: <http://127.0.0.1:8000/healthz>
 
-Pruebe «Cotiza 300000 pesos a 36 meses» en Gradio. `healthz` debe responder JSON, pero **no** significa que una llamada
-esté funcionando. Para revisar errores:
+Pruebe en Gradio: **«Cotiza 300000 pesos a 36 meses»**. Compruebe los registros:
 
-```powershell
-docker compose logs --tail=80 vantra
-docker compose logs --tail=80 twilio-webhook
+```bash
+docker compose logs --tail=100 vantra
+docker compose logs --tail=100 twilio-webhook
 ```
 
-Detener conservando el volumen y la lista DNC: `docker compose down`. **No** utilice `docker compose down -v` si
-necesita conservar exclusiones o estados.
+`/healthz` comprueba la accesibilidad de FastAPI; **no certifica una llamada ni los servicios externos**. Para detener
+sin borrar el volumen SQLite: `docker compose down` (evitar `down -v` si necesita mantener la lista DNC).
 
-## 4. Alternativa sin Docker (uv)
+## Desarrollo local con uv
 
-```powershell
-uv lock                         # una vez, si aún no existe uv.lock
+Compatible con Python **3.11 y 3.12**, según `pyproject.toml`:
+
+```bash
 uv sync --group dev
 uv run python -m pytest -q
+uv run python scripts/run_evaluation.py
 uv run python app.py
 ```
 
-Para telefonía también debe levantar **otro proceso**:
+Para levantar además el receptor Twilio, en otra terminal:
 
-```powershell
+```bash
 uv run uvicorn src.telephony_server:app --host 127.0.0.1 --port 8000
 ```
 
-**Reproducibilidad:** en la versión base no se incluyó `uv.lock`. Genérelo con acceso a PyPI, agréguelo a Git y luego
-utilice `uv sync --locked --group dev`. Docker/CI no pueden garantizar dependencias idénticas hasta que se versione.
-Consulte [DevOps](docs/devops.md).
+**Reproducibilidad:** `uv.lock` aún no está incluido. Generarlo con acceso a PyPI, versionarlo y luego ejecutar
+`uv sync --locked --group dev`. La imagen admite un primer build sin lock, pero no puede garantizar exactamente las
+mismas versiones hasta que se versione.
 
-## 5. Activar LIVE (todavía sin telefonía real)
+## Configuración de APIs y llamadas
 
-Cree el recurso Azure Speech; confirme que Deepgram y Anthropic disponen de claves, permisos y saldo/cuota. Complete su
-`.env` (no lo publique):
+1. Copie `.env.example` como `.env`, complete claves y región real del servicio Azure. No publique el archivo.
+2. Cambie a `VANTRA_MODE=LIVE`, recree los servicios y pruebe primero Deepgram, Claude y Azure **desde Gradio**.
+3. Para telefonía, configure Twilio Voice, origen autorizado, permisos geográficos para República Dominicana y lista de
+   teléfonos de prueba con consentimiento documentado.
+4. Inicie ngrok hacia **FastAPI, puerto 8000** (`ngrok http 8000`) y copie la base `https://…` en
+   `TWILIO_PUBLIC_BASE_URL`. Mantenga **`TWILIO_CALLS_ENABLED=false`** hasta completar las verificaciones.
+5. Una vez validado el acceso público y los permisos del proveedor, active las llamadas únicamente a contactos
+   autorizados y en un entorno local protegido.
 
-```dotenv
-VANTRA_MODE=LIVE
-ANTHROPIC_API_KEY=REEMPLAZAR
-ANTHROPIC_MODEL=claude-sonnet-5
-DEEPGRAM_API_KEY=REEMPLAZAR
-DEEPGRAM_MODEL=nova-3
-AZURE_SPEECH_KEY=REEMPLAZAR
-AZURE_SPEECH_REGION=CODIGO_REAL_DE_REGION
-AZURE_SPEECH_VOICE=es-DO-RamonaNeural
-TWILIO_CALLS_ENABLED=false
+```bash
+docker compose up -d --force-recreate
 ```
 
-Si utiliza Docker, aplique el cambio: `docker compose up -d --force-recreate`. En Gradio pruebe voz entrante aceptando
-el consentimiento y seleccione «Generar audio de respuesta» para probar Azure. **La región debe coincidir con la de su
-recurso**, y el identificador del modelo debe estar habilitado en su cuenta. Algunos servicios pueden generar cargos.
+Las llamadas aceptan `+1809`, `+1829` o `+1849` seguidos de siete dígitos; no existe marcación masiva. Si necesita
+realizar una prueba **manual previamente consentida** fuera del horario técnico predeterminado, consulte
+`TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS` en la guía de telefonía.
 
-Guía completa: [variables de entorno y proveedores](docs/configuration.md).
+## Validación y calidad
 
-## 6. Telefonía saliente a RD — únicamente piloto consentido
-
-Solo después de verificar el flujo por Gradio, configure Twilio Voice, su caller ID, permisos geográficos de **Voice**
-para República Dominicana, destinatario de prueba permitido y un túnel HTTPS/WSS hacia **FastAPI 8000**. **En una cuenta
-Twilio Trial actual, el inicio por API y el TwiML con `<Connect><Stream>` pueden no estar permitidos; verifique las
-restricciones concretas y considere un plan de pago si la modalidad es incompatible.** El origen HTTPS público mostrado
-por ngrok se coloca en `TWILIO_PUBLIC_BASE_URL`; **no se obtiene de Twilio**.
-
-```dotenv
-TWILIO_CALLS_ENABLED=false
-TWILIO_ACCOUNT_SID=AC_REEMPLAZAR
-TWILIO_AUTH_TOKEN=REEMPLAZAR
-TWILIO_FROM_NUMBER=+1XXXXXXXXXX
-TWILIO_PUBLIC_BASE_URL=https://SU_DOMINIO_REAL.ngrok-free.app
-TWILIO_TEST_NUMBERS=+1809XXXXXXX
-```
-
-En otra terminal Windows: `ngrok http 8000`. Compruebe `https://SU_DOMINIO_REAL.ngrok-free.app/healthz`, sin exponer
-Gradio `7860`. **Solo después de completar todas las comprobaciones** active `TWILIO_CALLS_ENABLED=true`, recree los
-contenedores y pulse manualmente «Iniciar UNA llamada real».
-
-**Restricciones del código:** 1 llamada simultánea; máximo de 3 solicitudes por día; duración máxima 180 s; lunes a
-viernes 09:00–17:59 hora Santo Domingo; allowlist estricta, consentimiento confirmado y DNC local. No es un sistema de
-call center productivo ni garantía de cumplimiento normativo.
-
-Guías
-ordenadas: [Twilio](docs/twilio-setup.md) → [ngrok](docs/ngrok-setup.md) → [primera llamada](docs/first-call.md) → [diagnóstico](docs/troubleshooting.md).
-**No se ha realizado una llamada real durante la elaboración de este paquete.**
-
-## 7. Pruebas, calidad y evaluación
-
-Con uv instalado en la máquina de desarrollo:
-
-```powershell
-uv sync --group dev
-uv run python -m pytest -q
+```bash
+uv run python -m pytest -q --cov=src --cov=app --cov-report=term-missing
 uv run ruff check .
 uv run pre-commit install
 uv run pre-commit run --all-files
 uv run python scripts/run_evaluation.py
 ```
 
-Los resultados offline se guardan en `results/`: `demo_evaluation_36.csv`, `subgroups_demo.csv` y `summary_demo.json`.
-**36/36 es una verificación de reglas sintéticas y no un resultado de llamadas reales**. Las métricas de voz, costo, WER
-y experiencia humana requieren pruebas LIVE y no se deben inventar. GitHub Actions valida Python 3.11/3.12 y
-construcción Docker, sin desplegar ni consumir APIs externas.
+Los archivos de `results/` contienen **resultados de DEMO sintético**, no mediciones de precisión acústica, naturalidad,
+latencia o facturación LIVE. Las pruebas LIVE requieren voluntarios, consentimiento, evaluación humana y registro de
+consumo del proveedor.
 
-Consulte [DevOps](docs/devops.md), [protocolo](docs/evaluation_protocol.md) y [evidencias](docs/evidence_checklist.md).
-
-## 8. Componentes y estructura
+## Estructura
 
 ```text
-app.py                       Gradio: DEMO, LIVE y botón de llamada real
-src/agent.py                 Agente, reglas del negocio y Claude opcional
-src/speech.py                Deepgram por archivo y Azure TTS
-src/telephony.py             Twilio REST, allowlist, límites, DNC y estados
-src/telephony_server.py      FastAPI, webhooks y WebSocket audio
-src/storage.py, src/tools.py  SQLite y operaciones con datos sintéticos
-compose.yaml                 vantra (7860) + twilio-webhook (8000)
-Dockerfile                   Imagen Python 3.12 no privilegiada
-pyproject.toml                Dependencias y configuración DevOps
-data/                        Catálogo y escenarios ficticios
-scripts/, tests/, results/    Evaluación determinista y pruebas offline
-docs/                        Manual de ejecución, API, ética, evidencias
+app.py                   Interfaz Gradio (texto, voz y telefonía restringida)
+src/agent.py             Agente y reglas de negocio
+src/speech.py            STT Deepgram por archivo y TTS Azure
+src/telephony.py         Políticas y llamadas REST Twilio
+src/telephony_server.py  Webhooks, WebSocket y audio telefónico
+src/tools.py             Herramientas y cálculos financieros sintéticos
+src/storage.py           Persistencia SQLite
+compose.yaml             Dos servicios: vantra y twilio-webhook
+data/                    Catálogo y casos ficticios
+tests/, scripts/          Pruebas y evaluación automatizada
+results/                 Evidencias deterministas de DEMO
+docs/                    Documentación técnica y académica del MVP
 ```
 
-Los contenedores comparten un volumen para SQLite y mantener DNC. El sistema **no almacena deliberadamente audio en
-SQLite**, pero pueden existir cachés y registros de los proveedores; no introduzca datos bancarios ni información
-personal real. El panel Gradio carece de autenticación suficiente para exposición pública.
+## Documentación
 
-## 9. Documentación y entrega académica
+| Guía                                               | Contenido                                               |
+|----------------------------------------------------|---------------------------------------------------------|
+| [Instalación](docs/installation.md)                | PyCharm, Docker, uv, pruebas y CI.                      |
+| [Configuración](docs/configuration.md)             | Variables `.env`, proveedores y credenciales.           |
+| [Arquitectura](docs/architecture.md)               | Componentes, flujos y límites técnicos.                 |
+| [Telefonía](docs/telephony.md)                     | Twilio, ngrok, primera llamada y controles dominicanos. |
+| [Evaluación](docs/evaluation.md)                   | Escenarios, métricas, subgrupos y evidencias.           |
+| [Ética](docs/ethics.md)                            | Riesgos, medidas y limitaciones.                        |
+| [Resolución de problemas](docs/troubleshooting.md) | Diagnóstico Docker, proveedores y errores Twilio.       |
 
-El índice de todas las guías se encuentra en **[`docs/README.md`](docs/README.md)**. También están
-disponibles [arquitectura](docs/architecture.md), [Canvas](docs/canvas_updated.md), [ética](docs/ethical_analysis.md)
-y [guion de presentación](docs/demo_script.md).
+## Seguridad y alcance
 
-Para completar la Fase 2 sigue pendiente generar `uv.lock`, publicar el repositorio y recopilar **evidencias verificadas
-de integraciones LIVE** (incluida una llamada consentida si es viable) antes de describirlas como operativas. La
-documentación y las pruebas offline no sustituyen esa validación.
+Utilice **solo datos y números de prueba autorizados**. El panel Gradio no cuenta con autenticación robusta para
+publicarlo como servicio público. Evite grabaciones, datos financieros reales y secretos en el repositorio, capturas o
+registros. La voz telefónica se procesa con terceros; confirme sus términos y requisitos legales antes de cualquier uso
+más allá de pruebas consentidas.
 
-### Diagnóstico de errores Twilio (HTTPError)
-
-Si la interfaz muestra que Twilio rechazó una llamada, anote solo el **estado HTTP** y el **código numérico Twilio**
-mostrados, sin enviar números completos ni credenciales.
-Consulte [solución de problemas](docs/troubleshooting.md#error-al-iniciar-llamada-twilio-no-pudo-iniciar-llamada-httperror).
-En cuentas Trial, los verbos `<Stream>` están bloqueados y pueden existir restricciones adicionales para
-`Create a Call`; la telefonía bidireccional requiere capacidades habilitadas en la cuenta.
+**Entregables académicos:** el informe PDF, Canvas, reflexión extensa y evidencias finales se mantienen **fuera del
+repositorio de software**, en la carpeta de entrega de la asignatura. Las funciones codificadas no se consideran pruebas
+de aceptación de APIs reales.

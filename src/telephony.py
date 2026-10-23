@@ -119,7 +119,10 @@ def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
     allowlist = {p.strip() for p in env('TWILIO_TEST_NUMBERS').split(',') if p.strip()}
     if number not in allowlist:
         raise CallPolicyError('Número no autorizado: agréguelo a TWILIO_TEST_NUMBERS tras obtener consentimiento.')
-    if check_time and not _allowed_now():
+    # Excepción opt-in exclusivamente para pruebas manuales con teléfonos autorizados.
+    # Se conservan consentimiento, allowlist, DNC y límites de volumen.
+    allow_after_hours = env('TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS', 'false').lower() == 'true'
+    if check_time and not allow_after_hours and not _allowed_now():
         raise CallPolicyError('Fuera del horario de pruebas: lunes a viernes, 09:00–17:59 (Santo Domingo).')
     for field in ('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
                   'TWILIO_PUBLIC_BASE_URL', 'DEEPGRAM_API_KEY', 'AZURE_SPEECH_KEY',

@@ -191,6 +191,34 @@ def test_dominican_local_schedule_blocks(configured, monkeypatch):
         phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
 
 
+def test_after_hours_requires_explicit_flag(configured, monkeypatch):
+    monkeypatch.setattr(phone, '_allowed_now', lambda: False)
+    monkeypatch.setenv('TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS', 'false')
+    with pytest.raises(phone.CallPolicyError, match='Fuera del horario'):
+        phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+
+def test_after_hours_pilot_allows_only_opted_in_number(configured, monkeypatch):
+    monkeypatch.setattr(phone, '_allowed_now', lambda: False)
+    monkeypatch.setenv('TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS', 'true')
+    with pytest.raises(phone.CallPolicyError, match='consentimiento'):
+        phone.start_test_call(ALLOW, confirmed=False, transport=fake_post)
+    with pytest.raises(phone.CallPolicyError, match='no autorizado'):
+        phone.start_test_call('+18291234567', confirmed=True, transport=fake_post)
+    created = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    assert created['status'] == 'queued'
+    with pytest.raises(phone.CallPolicyError, match='otra llamada'):
+        phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+
+def test_after_hours_dnc_still_blocks(configured, monkeypatch):
+    monkeypatch.setattr(phone, '_allowed_now', lambda: False)
+    monkeypatch.setenv('TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS', 'true')
+    phone.add_do_not_call(ALLOW)
+    with pytest.raises(phone.CallPolicyError, match='DNC'):
+        phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+
 def test_ambiguous_twilio_timeout_fails_closed(configured):
     import requests
     def uncertain(url, **kwargs):

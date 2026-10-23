@@ -1,88 +1,67 @@
-# Diagnóstico y resolución de problemas
+# Resolución de problemas
 
-**Regla general:** no publique capturas, trazas ni logs que muestren API keys, teléfonos reales, firmas Twilio o
-información identificable de los probadores.
+No comparta claves, teléfonos completos, firmas de Twilio, grabaciones, datos bancarios ni trazas con identificadores de
+participantes. Anote solo servicio, hora aproximada, tipo de error, estado HTTP y **código numérico** del proveedor.
 
-## Comandos de observación (Docker)
+## Diagnóstico inicial
 
-Desde PyCharm → Terminal en `vantra-ai`:
-
-```powershell
+```bash
 docker compose ps
 docker compose logs --tail=100 vantra
 docker compose logs --tail=100 twilio-webhook
-Invoke-RestMethod http://127.0.0.1:8000/healthz
 ```
 
-Si cambió solo `.env`, ejecute `docker compose up -d --force-recreate`. Si cambió código/Dockerfile,
-`docker compose up -d --build`. Para ver el estado de la llamada, revise también el panel de Twilio y no únicamente
-Gradio.
+Compruebe localmente <http://127.0.0.1:8000/healthz> y, si usa ngrok, `https://SU_DOMINIO_REAL/healthz`.
 
-## Errores habituales
+| Problema                           | Causa o comprobación                                                                                                              |
+|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| Docker no inicia                   | Verificar Docker Desktop, motor Linux y `docker info`.                                                                            |
+| Puerto ocupado                     | Cerrar proceso previo o modificar `VANTRA_PORT`/`TWILIO_WEBHOOK_PORT`; actualizar túnel si cambia 8000.                           |
+| Cambios de `.env` no aplicados     | Ejecutar `docker compose up -d --force-recreate`.                                                                                 |
+| Cambios de código no aplicados     | Ejecutar `docker compose up -d --build`.                                                                                          |
+| Gradio sigue en DEMO               | Comprobar `VANTRA_MODE=LIVE`, `.env` correcto y recreación de contenedor.                                                         |
+| Claude aparentemente no se usa     | Algunas consultas se resuelven con Python; probar consulta abierta y verificar credencial/modelo/cuota.                           |
+| Deepgram no transcribe             | Autorizar audio, comprobar LIVE, clave, modelo, formato y logs.                                                                   |
+| Azure no produce sonido            | Activar casilla de TTS, confirmar clave, región exacta, voz y cuota.                                                              |
+| No responde `/healthz`             | Verificar servicio `twilio-webhook` y puerto 8000.                                                                                |
+| `/healthz` público no responde     | ngrok cerrado, dominio cambiado o túnel dirigido a un puerto incorrecto.                                                          |
+| `TWILIO_PUBLIC_BASE_URL` inválida  | Debe ser solo `https://host`, sin rutas ni consulta.                                                                              |
+| Llamada bloqueada por aplicación   | Revisar modo, activación, consentimientos, lista permitida, horario, DNC y límites. No suprimir controles para resolver un fallo. |
+| Llamada creada sin audio o cortada | Revisar WebSocket `/twilio/media`, conectividad WSS, Twilio Debugger, Deepgram streaming y TTS μ-law/8 kHz.                       |
+| Más llamadas bloqueadas tras error | Una petición incierta puede estar activa; confirmar en Twilio Console **antes** de reintentar. No borrar SQLite/DNC.              |
 
-| Síntoma                                           | Comprobación                                                                                                                                         | Acción recomendada                                                                                               |
-|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `docker` no encontrado                            | Docker Desktop y terminal/Path                                                                                                                       | Instalar y reiniciar terminal.                                                                                   |
-| `docker info` no conecta                          | Docker Desktop / WSL2                                                                                                                                | Iniciar motor Linux; esperar estado Ready.                                                                       |
-| Puerto 7860/8000 ocupado                          | Servicios locales previos                                                                                                                            | Cerrar proceso en conflicto o ajustar `VANTRA_PORT`/`TWILIO_WEBHOOK_PORT` **concordando ngrok**.                 |
-| Build Docker falla instalando Python              | Conectividad y versiones PyPI; `uv.lock` ausente                                                                                                     | Reintentar con conexión; generar y versionar `uv.lock`; revisar logs del build.                                  |
-| `ModuleNotFoundError` desde PyCharm               | Ejecución en host en lugar del contenedor                                                                                                            | Para Compose use `docker compose up`; si usa uv, `uv sync --group dev`.                                          |
-| Gradio muestra `DEMO` después de cambiar a `LIVE` | `compose.yaml` pasa variables al crear contenedores                                                                                                  | Confirmar `.env` y recrear; refrescar página.                                                                    |
-| Claude no aparece en una respuesta                | Consultas del catálogo las resuelve Python                                                                                                           | Probar consulta abierta y revisar credenciales/modelo/cuotas; no asumir que todo texto invoca LLM.               |
-| Deepgram no transcribe desde Gradio               | Modo LIVE, audio, casilla de autorización, credenciales, formato                                                                                     | Revisar logs y límites; probar grabación simple.                                                                 |
-| Azure devuelve `TTS no disponible`                | `AZURE_SPEECH_KEY`, región de recurso, disponibilidad de voz y cuota                                                                                 | Verificar Azure Portal y voz en modo LIVE; la casilla «Generar audio» debe estar activada.                       |
-| `/healthz` local falla                            | Servidor `twilio-webhook`, puerto 8000                                                                                                               | `docker compose logs --tail=100 twilio-webhook`.                                                                 |
-| `/healthz` público falla                          | ngrok y puerto destino                                                                                                                               | Mantener `ngrok http 8000` activo; comparar URL; comprobar HTTP HTTPS; no usar 7860.                             |
-| `TWILIO_PUBLIC_BASE_URL` inválida                 | Esquema y rutas                                                                                                                                      | Debe ser solo `https://host-publico`, sin `/healthz`, `/twilio/media` ni puerto.                                 |
-| Llamada bloqueada por aplicación                  | `TWILIO_CALLS_ENABLED`, `VANTRA_MODE`, allowlist, horario, DNC, máximo 3/día                                                                         | Cumplir controles; no omitir ni falsificar consentimiento.                                                       |
-| Twilio rechaza llamada                            | Saldo/trial, Geo Permissions de **Voice**, verificación del destino, origen autorizado; Trial puede restringir `Create a Call` y `<Connect><Stream>` | Revisar logs y límites del plan; no eludir controles, considerar plan compatible.                                |
-| Twilio crea llamada, pero corta                   | WebSocket no conecta, firma, URL pública diferente, nonce                                                                                            | Revisar logs de `twilio-webhook`, ngrok y Twilio Debugger/Logs.                                                  |
-| Twilio 31920                                      | WSS no logra handshake (101)                                                                                                                         | Verificar `wss://.../twilio/media`, ruta sin query y soporte WebSocket del túnel.                                |
-| Firma 403 en `/twilio/status`                     | Base HTTPS usada al firmar no coincide, token cambiado, cabecera ausente                                                                             | Actualizar `.env` con host actual y recrear ambos servicios. No deshabilitar validación.                         |
-| Hay conversación, pero sin audio en un sentido    | Azure RAW μ-law / Deepgram streaming / redes                                                                                                         | Revisar trazas de integración, cuotas y compatibilidad a 8 kHz.                                                  |
-| Timeout al llamar                                 | Petición incierta; Twilio pudo aceptar llamada                                                                                                       | **NO reintentar hasta consultar la consola Twilio**.                                                             |
-| Se bloquean nuevas llamadas indefinidamente       | Estado anterior no terminal / callback perdido                                                                                                       | Verificar situación real en Twilio antes de intervenir el registro; no borrar SQLite/DNC como «solución rápida». |
-| El destinatario pide no contactar                 | Lista DNC local                                                                                                                                      | Registrar exclusión y terminar comunicación.                                                                     |
+## Twilio: error HTTP al iniciar llamada
 
-## Comprobar si cambió la URL de ngrok
+El mensaje `HTTPError` no permite concluir que faltan fondos; una respuesta de la API puede deberse a credenciales,
+origen, permisos geográficos, restricciones Trial u otro motivo. La aplicación muestra estado HTTP y, cuando existe,
+código numérico Twilio sin imprimir la respuesta íntegra.
 
-Si reinició ngrok, su dominio público podría haber cambiado. `TWILIO_PUBLIC_BASE_URL` debe coincidir **exactamente** con
-el origen activo. El servidor FastAPI usa esa URL para verificar firmas; dejar una URL anterior puede producir errores
-incluso si `/healthz` local responde.
+1. Consulte **Twilio Console → Monitor → Debugger** y, si se creó la llamada, sus Voice Logs.
+2. Compare el código con la [documentación oficial de errores](https://www.twilio.com/docs/api/errors). Ejemplos
+   posibles:
 
-## Sobre las diferencias entre Gradio y llamada telefónica
+| Código            | Pista de diagnóstico                                        |
+|-------------------|-------------------------------------------------------------|
+| `20003`           | Autenticación de API incorrecta.                            |
+| `21210` / `21212` | Autorización o validez del origen.                          |
+| `21215`           | Voice Geographic Permissions del país de destino.           |
+| `21219`           | Verificación del número destinatario exigida por la cuenta. |
+| `10002`           | Función restringida para cuenta Trial.                      |
 
-Gradio procesa audio **por archivo** cuando el usuario pulsa un botón. La telefonía usa **streaming WebSocket** continuo
-y audio μ-law mono 8 kHz, además de llamadas a Azure y Deepgram. Que Gradio genere audio correctamente **no prueba** el
-circuito telefónico, aunque sí ayuda a aislar credenciales y problemas de servicio.
+3. Revise si la cuenta admite **`<Connect><Stream>` y Media Streams bidireccionales**; algunas modalidades Trial no lo
+   permiten. Un cambio de túnel o de `VANTRA_MODE` no elimina esa restricción.
+4. Evite reintentos repetidos, especialmente si hubo timeout. Verifique primero el estado real en Twilio.
 
-## Cómo recopilar un reporte de fallo útil
+## WebSocket y firmas
 
-Anote **sin secretos**: sistema operativo; versión Docker/Compose; paso donde falló; modo DEMO/LIVE; hora aproximada;
-código de error del proveedor; servicio y endpoint involucrado; resultado de `/healthz`; captura anonimizada o resumen
-del log. Si se trata de una llamada, confirme si Twilio llegó a crear un `CallSid` (no publique IDs sensibles
-innecesariamente).
+La ruta Twilio debe ser `wss://SU_DOMINIO_REAL/twilio/media`. Un error de handshake (por ejemplo, 31920) requiere
+revisar el túnel y la respuesta WebSocket. Si el webhook de estados responde 403, compruebe `TWILIO_PUBLIC_BASE_URL`,
+host realmente utilizado por ngrok y credenciales; **no desactive la validación de firmas** para hacer pasar la prueba.
 
-Referencias: [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), [error 31920](https://www.twilio.com/docs/api/errors/31920), [Docker Compose](https://docs.docker.com/compose/), [ngrok](https://ngrok.com/docs/).
+## Qué registrar para soporte
 
-## Error al iniciar llamada: `Twilio no pudo iniciar llamada (HTTPError)`
+Sistema operativo; versión de Compose; modo DEMO/LIVE; paso exacto; servicio implicado; hora; estado HTTP y código de
+error; resultado de salud local y pública; descripción anonimizada. Mantenga las credenciales y números reales fuera de
+capturas y chats.
 
-El mensaje de versiones anteriores de la interfaz era genérico. **No significa por sí mismo** que falten fondos: la
-respuesta HTTP puede indicar autenticación, permisos geográficos, remitente inválido, número de destino no verificado o
-restricciones Trial. El código ahora muestra **HTTP y código numérico de Twilio**, nunca la respuesta textual íntegra
-que podría contener números.
-
-1. En Twilio Console, consulte **Monitor → Debugger** y, si existe un registro, los **Voice Call Logs**. Si no se creó
-   `CallSid`, podría no aparecer entre las llamadas iniciadas.
-2. Consulte el valor `HTTP NNN, código Twilio XXXXX` en la pestaña *Llamada REAL* de Gradio.
-3. Interprete las incidencias más habituales: `21215` (Geo Permissions), `21219` (destino no verificado), `21212`
-   (origen inválido), `21210` (origen no verificado), `20003` (autenticación), `10002` (función restringida a Trial).
-4. Si la cuenta es **Trial**, consulte [Try out Twilio Voice](https://www.twilio.com/docs/usage/trials/try-out-voice):
-   la creación de llamadas mediante API admite parámetros limitados; además, **`<Stream>` está bloqueado** en TwiML
-   personalizado durante Trial. El flujo bidireccional que usa Vantra AI requiere una cuenta que permita Media Streams.
-   No se arregla modificando ngrok ni cambiando a LIVE.
-5. Evite repetir la llamada hasta confirmar el motivo; cada intento puede consumir una cuota diaria del piloto. Si
-   `HTTPError` apareció, la API no aceptó la solicitud como éxito.
-
-Nunca copie claves, Auth Tokens, números completos ni el cuerpo íntegro de la respuesta HTTP en capturas públicas o
-chats.
+Véanse [instalación](installation.md), [configuración](configuration.md) y [telefonía](telephony.md).
