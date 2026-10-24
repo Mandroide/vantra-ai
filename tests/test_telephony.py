@@ -270,3 +270,28 @@ def test_twilio_http_error_without_json_or_response(configured):
     msg = phone.summarize_twilio_http_error(no_response)
     assert 'desconocido' in msg
     assert 'abc' not in msg
+
+
+def test_daily_limit_default_three_includes_failed_attempts(configured):
+    # Un HTTP 401 puede dejar un intento en estado error; igualmente cuenta para el limite.
+    for _ in range(3):
+        call_id, _ = phone._reserve(ALLOW)
+        phone.update_call(call_id, 'error')
+    with pytest.raises(phone.CallPolicyError, match='3 intentos'):
+        phone._reserve(ALLOW)
+
+
+def test_daily_limit_can_be_raised_temporarily(configured, monkeypatch):
+    monkeypatch.setenv('TWILIO_DAILY_CALL_LIMIT', '5')
+    for _ in range(5):
+        call_id, _ = phone._reserve(ALLOW)
+        phone.update_call(call_id, 'error')
+    with pytest.raises(phone.CallPolicyError, match='5 intentos'):
+        phone._reserve(ALLOW)
+
+
+@pytest.mark.parametrize('bad', ['0', '11', '-1', 'no', '3.5', ''])
+def test_daily_limit_requires_reasonable_value(configured, monkeypatch, bad):
+    monkeypatch.setenv('TWILIO_DAILY_CALL_LIMIT', bad)
+    with pytest.raises(phone.CallPolicyError, match='TWILIO_DAILY_CALL_LIMIT'):
+        phone._reserve(ALLOW)

@@ -26,6 +26,7 @@ prefijo). Por seguridad, el software rechaza otros prefijos.
 VANTRA_MODE=LIVE
 TWILIO_CALLS_ENABLED=false
 TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=false
+TWILIO_DAILY_CALL_LIMIT=3
 TWILIO_ACCOUNT_SID=AC_REEMPLAZAR_CON_SID_REAL
 TWILIO_AUTH_TOKEN=REEMPLAZAR
 TWILIO_FROM_NUMBER=+1XXXXXXXXXX
@@ -96,9 +97,10 @@ Puede comprobar las variables locales con `uv run python scripts/check_twilio_se
 7. Al terminar, desactive `TWILIO_CALLS_ENABLED`, recree contenedores y documente errores, latencias y costos realmente
    observados.
 
-**Límites técnicos:** una llamada simultánea, tres solicitudes por día, duración máxima de 180 segundos y horario por
-defecto de lunes a viernes, 09:00–17:59 (`America/Santo_Domingo`). Para pruebas **manuales previamente autorizadas**
-fuera de horario establezca temporalmente:
+**Límites técnicos:** una llamada simultánea, límite diario configurable entre 1 y 10 intentos
+(`TWILIO_DAILY_CALL_LIMIT`, predeterminado: 3), duración máxima de 180 segundos y horario por defecto de lunes a
+viernes, 09:00–17:59 (`America/Santo_Domingo`). Para pruebas **manuales previamente autorizadas** fuera de horario
+establezca temporalmente:
 
 ```dotenv
 TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=true
@@ -107,6 +109,12 @@ TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=true
 Luego `docker compose up -d --force-recreate`. Esta opción **solo desactiva la regla horaria local**; conserva
 consentimiento, lista positiva, DNC y límites. Restáurela a `false` al terminar. No sustituye las normas de
 comunicaciones comerciales aplicables.
+
+**Límite diario:** el contador considera todas las solicitudes reservadas, incluidas las que Twilio rechaza (por
+ejemplo, HTTP 401). Se reinicia a medianoche de Santo Domingo. Para ampliar temporalmente las pruebas a cinco intentos,
+configure `TWILIO_DAILY_CALL_LIMIT=5` en `.env` y ejecute `docker compose up -d --force-recreate`. No borre el volumen
+de SQLite para reiniciar el contador; podría borrar también la lista de exclusiones. Resolver primero el error del
+proveedor evita consumir más intentos.
 
 ## 6. Diagnóstico y seguridad
 

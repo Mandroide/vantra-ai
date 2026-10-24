@@ -140,6 +140,18 @@ def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
     return number
 
 
+def _daily_call_limit() -> int:
+    """Límite de intentos diarios de piloto (1..10); nunca ilimitado."""
+    configured = env('TWILIO_DAILY_CALL_LIMIT', '3').strip()
+    try:
+        maximum = int(configured)
+    except ValueError as exc:
+        raise CallPolicyError('TWILIO_DAILY_CALL_LIMIT debe ser un entero entre 1 y 10.') from exc
+    if not 1 <= maximum <= 10:
+        raise CallPolicyError('TWILIO_DAILY_CALL_LIMIT debe estar entre 1 y 10.')
+    return maximum
+
+
 def _reserve(phone: str) -> tuple[str, str]:
     now = int(time.time())
     today = datetime.now(TZ).date()
@@ -156,9 +168,11 @@ def _reserve(phone: str) -> tuple[str, str]:
                 0]
             if active >= 1:
                 raise CallPolicyError('Existe otra llamada en curso. Solo se permite una simultánea.')
+            # Se cuentan intentos, incluso los rechazados por Twilio, como control de volumen.
+            daily_limit = _daily_call_limit()
             n = c.execute('SELECT COUNT(*) FROM phone_calls WHERE created_utc>=?', (start_today,)).fetchone()[0]
-            if n >= 3:
-                raise CallPolicyError('Límite diario de piloto alcanzado (3 llamadas).')
+            if n >= daily_limit:
+                raise CallPolicyError(f'Límite diario de piloto alcanzado ({daily_limit} intentos).')
             call_id, nonce = uuid4().hex, secrets.token_urlsafe(32)
             c.execute('INSERT INTO phone_calls VALUES (?,?,?,?,?,?,?)',
                       (call_id, nonce, number_hash, None, 'reserved', now, now))

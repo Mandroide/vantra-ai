@@ -58,6 +58,7 @@ sin borrar el volumen SQLite: `docker compose down` (evitar `down -v` si necesit
 Compatible con Python **3.11 y 3.12**, según `pyproject.toml`:
 
 ```bash
+uv lock                     # si aún falta uv.lock
 uv sync --group dev
 uv run python -m pytest -q
 uv run python scripts/run_evaluation.py

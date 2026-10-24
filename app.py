@@ -80,7 +80,7 @@ def call_real(number, prior_consent, authorized_recipient):
     try:
         result = start_test_call(number, confirmed=True)
         return f"Twilio recibió solicitud: {result['status']}. SID: {result['call_sid']}. Estado pendiente de confirmación.", \
-        result['id']
+            result['id']
     except (CallPolicyError, RuntimeError) as exc:
         return f'Bloqueado: {exc}', ''
     except requests.exceptions.HTTPError as exc:

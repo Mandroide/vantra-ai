@@ -72,3 +72,9 @@ consulte [troubleshooting.md](troubleshooting.md).
 
 Referencias de los
 fabricantes: [Anthropic API](https://docs.anthropic.com/), [Deepgram](https://developers.deepgram.com/), [Azure Speech](https://learn.microsoft.com/azure/ai-services/speech-service/), [Twilio Voice](https://www.twilio.com/docs/voice).
+
+### Límite de intentos de telefonía
+
+`TWILIO_DAILY_CALL_LIMIT=3` controla el número máximo de intentos diarios (rango admitido: 1–10) en la zona horaria de
+Santo Domingo. Incluye solicitudes fallidas, sin eliminar los controles de consentimiento, autorización de destinatario
+y DNC.
