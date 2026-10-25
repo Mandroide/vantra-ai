@@ -25,7 +25,7 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
       VANTRA_MODE: DEMO
       PYTHONPATH: .
-      VANTRA_DB_PATH: ${{ runner.temp }}/vantra_ci_${{ matrix.python-version }}.sqlite3
+      VANTRA_DB_PATH: ./vantra_ci_${{ matrix.python-version }}.sqlite3
     steps:
       - name: Obtener código
         uses: actions/checkout@v7
