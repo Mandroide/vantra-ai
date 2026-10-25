@@ -42,6 +42,8 @@ def test_configuration_guide_lists_runtime_variables():
             "AZURE_SPEECH_REGION", "TWILIO_CALLS_ENABLED", "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_PUBLIC_BASE_URL",
             "TWILIO_TEST_NUMBERS", "TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS",
+            "TWILIO_DAILY_CALL_LIMIT", "CONNECTIVITY_PROVIDER", "NGROK_AUTHTOKEN",
+            "CLOUDFLARE_TUNNEL_TOKEN", "VANTRA_PUBLIC_HOST", "CADDY_EMAIL",
     ):
         assert f"{field}=" in example, field
         assert field in guide or field in telephony, field
@@ -49,7 +51,7 @@ def test_configuration_guide_lists_runtime_variables():
 
 def test_readme_does_not_claim_verified_live_calls():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "requiere una validación de extremo a extremo" in text
+    assert "evidencia de una conversación telefónica piloto" in text
     assert "TWILIO_CALLS_ENABLED=false" in text
-    assert "ngrok http 8000" in text
+    assert "scripts/connectivity.py" in text
     assert "36 verificaciones offline" in text

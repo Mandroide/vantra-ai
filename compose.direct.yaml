@@ -1,0 +1,27 @@
+# Para servidor con DNS público y puertos 80/443 accesibles.
+# Caddy obtiene y renueva TLS automáticamente para VANTRA_PUBLIC_HOST.
+services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      VANTRA_PUBLIC_HOST: ${VANTRA_PUBLIC_HOST:?Configure VANTRA_PUBLIC_HOST}
+      CADDY_EMAIL: ${CADDY_EMAIL:?Configure CADDY_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      twilio-webhook:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  caddy_data:
+  caddy_config:

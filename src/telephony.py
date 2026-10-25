@@ -29,10 +29,17 @@ DO_NUMBER = re.compile(r'^\+1(?:809|829|849)\d{7}$')
 CALL_SID = re.compile(r'^CA[a-zA-Z0-9]{32}$')
 TZ = ZoneInfo('America/Santo_Domingo')
 TERMINAL = {'completed', 'busy', 'failed', 'no-answer', 'canceled', 'rejected', 'error'}
+ACTIVE = {'reserved', 'queued', 'initiated', 'ringing', 'in-progress'}
+TWILIO_ACTIVE = {'queued', 'initiated', 'ringing', 'in-progress'}
+TWILIO_TERMINAL = {'completed', 'busy', 'failed', 'no-answer', 'canceled'}
 
 
 class CallPolicyError(ValueError):
     pass
+
+
+class ActiveCallError(CallPolicyError):
+    """Una reserva concurrente activa bloquea nuevos intentos."""
 
 
 def normalize_do_phone(phone: str) -> str:
@@ -94,6 +101,15 @@ def get_call(call_id: str) -> dict | None:
     return dict(zip(('id', 'call_sid', 'status', 'created_utc'), r)) if r else None
 
 
+def _active_calls() -> list[dict]:
+    """Instantánea de llamadas locales activas sin números ni datos personales."""
+    with closing(_conn()) as c:
+        rows = c.execute("SELECT id,call_sid,status FROM phone_calls WHERE status IN "
+                         "('reserved','queued','initiated','ringing','in-progress')"
+                         " ORDER BY created_utc").fetchall()
+    return [dict(zip(('id', 'call_sid', 'status'), row)) for row in rows]
+
+
 def get_call_by_sid(sid: str) -> dict | None:
     if not CALL_SID.fullmatch(sid or ''):
         return None
@@ -141,10 +157,10 @@ def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
 
 
 def _daily_call_limit() -> int:
-    """Límite de intentos diarios de piloto (1..10); nunca ilimitado."""
-    configured = env('TWILIO_DAILY_CALL_LIMIT', '3').strip()
+    """Máximo diario de intentos de piloto (1 a 10); nunca ilimitado."""
+    setting = env('TWILIO_DAILY_CALL_LIMIT', '3').strip()
     try:
-        maximum = int(configured)
+        maximum = int(setting)
     except ValueError as exc:
         raise CallPolicyError('TWILIO_DAILY_CALL_LIMIT debe ser un entero entre 1 y 10.') from exc
     if not 1 <= maximum <= 10:
@@ -167,10 +183,9 @@ def _reserve(phone: str) -> tuple[str, str]:
                 "SELECT COUNT(*) FROM phone_calls WHERE status IN ('reserved','queued','initiated','ringing','in-progress')").fetchone()[
                 0]
             if active >= 1:
-                raise CallPolicyError('Existe otra llamada en curso. Solo se permite una simultánea.')
-            # Se cuentan intentos, incluso los rechazados por Twilio, como control de volumen.
-            daily_limit = _daily_call_limit()
+                raise ActiveCallError('Existe otra llamada en curso. Solo se permite una simultánea.')
             n = c.execute('SELECT COUNT(*) FROM phone_calls WHERE created_utc>=?', (start_today,)).fetchone()[0]
+            daily_limit = _daily_call_limit()
             if n >= daily_limit:
                 raise CallPolicyError(f'Límite diario de piloto alcanzado ({daily_limit} intentos).')
             call_id, nonce = uuid4().hex, secrets.token_urlsafe(32)
@@ -184,30 +199,35 @@ def _reserve(phone: str) -> tuple[str, str]:
 
 
 def update_call(call_id: str, status: str, sid: str | None = None) -> None:
-    if status not in TERMINAL | {'reserved', 'queued', 'initiated', 'ringing', 'in-progress'}:
+    if status not in TERMINAL | ACTIVE:
         raise ValueError('Estado telefónico inválido')
+    # BEGIN IMMEDIATE serializa comparación y escritura: un callback tardío
+    # no puede revivir una llamada que otra conexión acaba de finalizar.
     with closing(_conn()) as c:
-        with c:
+        try:
+            c.execute('BEGIN IMMEDIATE')
             current = c.execute('SELECT status FROM phone_calls WHERE id=?', (call_id,)).fetchone()
-            if not current or current[0] in TERMINAL:
-                return
             progression = {'reserved': 0, 'queued': 1, 'initiated': 2, 'ringing': 3, 'in-progress': 4}
-            if progression.get(status, 10) < progression.get(current[0], 10):
-                return
-            if sid is None:
-                c.execute('UPDATE phone_calls SET status=?, updated_utc=? WHERE id=?',
-                          (status, int(time.time()), call_id))
-            else:
-                if not CALL_SID.fullmatch(sid):
-                    raise ValueError('Call SID inválido')
-                # No se sobrescribe SID; race webhook-media y creación puede ocurrir.
-                c.execute('''UPDATE phone_calls
-                             SET status=?,
-                                 call_sid=COALESCE(call_sid, ?),
-                                 updated_utc=?
-                             WHERE id = ?
-                               AND (call_sid IS NULL OR call_sid = ?)''',
-                          (status, sid, int(time.time()), call_id, sid))
+            if (current and current[0] not in TERMINAL and
+                progression.get(status, 10) >= progression.get(current[0], 10)):
+                if sid is None:
+                    c.execute('UPDATE phone_calls SET status=?, updated_utc=? WHERE id=?',
+                              (status, int(time.time()), call_id))
+                else:
+                    if not CALL_SID.fullmatch(sid):
+                        raise ValueError('Call SID inválido')
+                    # No se sobrescribe SID; race webhook-media y creación puede ocurrir.
+                    c.execute('''UPDATE phone_calls
+                                 SET status=?,
+                                     call_sid=COALESCE(call_sid, ?),
+                                     updated_utc=?
+                                 WHERE id = ?
+                                   AND (call_sid IS NULL OR call_sid = ?)''',
+                              (status, sid, int(time.time()), call_id, sid))
+            c.execute('COMMIT')
+        except BaseException:
+            c.execute('ROLLBACK')
+            raise
 
 
 def claim_stream(call_id: str, nonce: str, sid: str) -> bool:
@@ -313,19 +333,83 @@ def summarize_twilio_http_error(exc: requests.exceptions.HTTPError) -> str:
     return f'Twilio rechazó la solicitud ({detail}). {reason} No reintente sin verificar el motivo.'
 
 
-def start_test_call(phone: str, confirmed: bool, *, transport=None) -> dict:
+def refresh_call_status(call_id: str, *, transport=None) -> dict:
+    """Consulta un Call SID específico sin originar llamadas ni alterar estados terminales.
+
+    Ante fallo o respuesta incoherente nunca libera el bloqueo local.
+    transport permite simular el GET en pruebas sin contactar Twilio.
+    """
+    current = get_call(call_id)
+    if current is None:
+        raise CallPolicyError('Llamada local no encontrada.')
+    if current['status'] in TERMINAL or not current['call_sid']:
+        return current
+    sid = current['call_sid']
+    account = key('TWILIO_ACCOUNT_SID')
+    endpoint = f'https://api.twilio.com/2010-04-01/Accounts/{account}/Calls/{sid}.json'
+    fetcher = transport if transport is not None else requests.get
+    try:
+        response = fetcher(endpoint, auth=(account, key('TWILIO_AUTH_TOKEN')), timeout=7)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get('sid') != sid:
+            raise ValueError('Respuesta no corresponde a la llamada solicitada')
+        remote_status = payload.get('status')
+        if remote_status not in TWILIO_ACTIVE | TWILIO_TERMINAL:
+            raise ValueError('Estado no reconocido por Vantra AI')
+    except (requests.exceptions.RequestException, ValueError, TypeError, KeyError) as exc:
+        raise CallPolicyError(
+            'No se pudo verificar el estado en Twilio. Se mantiene el bloqueo por seguridad.'
+        ) from exc
+    update_call(call_id, remote_status, sid)
+    return get_call(call_id)
+
+
+def reconcile_active_calls(*, transport=None) -> bool:
+    """Libera reservas SOLO si Twilio confirmó el estado terminal de cada SID.
+
+    Una reserva sin SID puede ser una solicitud en vuelo o con timeout;
+    permanece bloqueada para evitar duplicación accidental de llamadas.
+    """
+    for call in _active_calls():
+        if not call['call_sid']:
+            return False
+        try:
+            refreshed = refresh_call_status(call['id'], transport=transport)
+        except CallPolicyError:
+            return False
+        if refreshed['status'] not in TERMINAL:
+            return False
+    return not _active_calls()
+
+
+def start_test_call(phone: str, confirmed: bool, *, transport=None, status_transport=None) -> dict:
     """Realiza UNA llamada real únicamente tras lista positiva, opt-in y controles.
 
     transport se inyecta únicamente para pruebas sin acceso a Twilio.
     """
     number = _preflight(phone, confirmed)
-    call_id, nonce = _reserve(number)
+    try:
+        call_id, nonce = _reserve(number)
+    except ActiveCallError:
+        # transport=... es el modo de prueba con API de creación simulada:
+        # no consultar Twilio real salvo que se inyecte también status_transport.
+        if transport is not None and status_transport is None:
+            raise
+        if not reconcile_active_calls(transport=status_transport):
+            raise ActiveCallError(
+                'Existe otra llamada activa o no verificable en Twilio. '
+                'Se mantiene el límite de una simultánea.'
+            ) from None
+        # Se reevalúan todos los controles dentro de una nueva transacción IMMEDIATE.
+        # Otra solicitud concurrente puede haber reservado entretanto; se bloquea.
+        call_id, nonce = _reserve(number)
     twiml = twiml_for_stream(call_id, nonce)
     sid = env('TWILIO_ACCOUNT_SID')
     endpoint = f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json'
     form = {
         'To': number, 'From': env('TWILIO_FROM_NUMBER'), 'Twiml': twiml,
-        'StatusCallback': public_url('/twilio/status'),
+        'StatusCallback': public_url('/twilio/status') + '?call_id=' + call_id,
         'StatusCallbackMethod': 'POST',
         'StatusCallbackEvent': ['initiated', 'ringing', 'answered', 'completed'],
         'TimeLimit': '180',
@@ -334,21 +418,38 @@ def start_test_call(phone: str, confirmed: bool, *, transport=None) -> dict:
     try:
         response = sender(endpoint, data=form, auth=(sid, key('TWILIO_AUTH_TOKEN')), timeout=20)
         response.raise_for_status()
-        result = response.json()
-        returned_sid = result['sid']
-        if not CALL_SID.fullmatch(returned_sid):
-            raise ValueError('Respuesta de Twilio sin SID válido')
+        try:
+            result = response.json()
+            returned_sid = result['sid']
+            if not isinstance(returned_sid, str) or not CALL_SID.fullmatch(returned_sid):
+                raise ValueError('SID inválido')
+        except (ValueError, KeyError, TypeError) as exc:
+            # Twilio respondió 2xx pero el cliente no puede identificar la llamada:
+            # no desbloquear hasta una comprobación manual en Twilio Console.
+            update_call(call_id, 'initiated')
+            raise CallPolicyError(
+                'Twilio respondió sin Call SID verificable. NO repita la llamada; '
+                'revise Twilio Console antes de liberar la reserva.'
+            ) from exc
         update_call(call_id, 'queued', returned_sid)
-        return {'id': call_id, 'call_sid': returned_sid, 'status': 'queued',
+        return {'id': call_id, 'call_sid': returned_sid,
+                'status': (get_call(call_id) or {}).get('status', 'queued'),
                 'message': 'Solicitud de llamada enviada a Twilio; aún no confirma que haya contestado.'}
-    except requests.exceptions.Timeout as exc:
-        # Una solicitud con timeout puede haber sido aceptada por Twilio.
-        # Bloquear más llamadas hasta comprobar manualmente la consola.
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+        # Una solicitud interrumpida pudo haber sido aceptada por Twilio.
         update_call(call_id, 'initiated')
         raise CallPolicyError(
-            'La solicitud expiró sin confirmación. NO repita: revise primero la consola de Twilio.') from exc
+            'No hubo confirmación del intento de llamada. NO repita: '
+            'revise primero el historial en Twilio Console.'
+        ) from exc
+    except requests.exceptions.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code >= 500:
+            update_call(call_id, 'initiated')  # respuesta ambigua del servidor
+        else:
+            update_call(call_id, 'error')
+        raise
     except Exception:
-        update_call(call_id, 'error')
+        update_call(call_id, 'initiated')  # falla inesperada con resultado incierto
         raise
 
 

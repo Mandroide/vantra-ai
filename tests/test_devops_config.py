@@ -32,9 +32,20 @@ def test_dockerfile_excludes_env_and_runs_non_root():
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     assert "USER vantra" in dockerfile
     assert "COPY --from=builder /app/.venv" in dockerfile
+    assert "COPY --chown=vantra:vantra scripts ./scripts" in dockerfile
     assert "\n.env\n" in dockerignore
     assert ".git" in dockerignore.splitlines()
 
 
 def test_secret_scan_passes_synthetic_repository():
     assert check_secrets() == 0
+
+
+def test_gitattributes_normalizes_source_without_touching_binary():
+    attrs = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "* text=auto" in attrs
+    for pattern in ("*.py", "*.yml", "*.yaml", "*.md", "*.json", "*.csv", "Dockerfile"):
+        assert any(line.lstrip().startswith(pattern + " ") and "text eol=lf" in line for line in attrs.splitlines())
+    for extension in ("*.ogg", "*.mp3", "*.wav", "*.png", "*.pdf", "*.zip", "*.sqlite3"):
+        assert any(line.lstrip().startswith(extension + " ") and "binary" in line for line in attrs.splitlines())
+    assert "*.ps1" in attrs and "eol=crlf" in attrs

@@ -33,7 +33,13 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
-    # El puerto se enlaza solo a localhost. Nunca exponga LIVE sin autenticación y límites.
+    # Gradio solo en loopback del host: NO exponer al túnel ni al proxy público.
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/', timeout=4).close()" ]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 60s
 
   twilio-webhook:
     build:
@@ -69,6 +75,12 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).close()" ]
+      interval: 20s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
 
 volumes:
   vantra_state:

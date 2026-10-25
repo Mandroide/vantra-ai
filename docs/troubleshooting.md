@@ -11,24 +11,53 @@ docker compose logs --tail=100 vantra
 docker compose logs --tail=100 twilio-webhook
 ```
 
-Compruebe localmente <http://127.0.0.1:8000/healthz> y, si usa ngrok, `https://SU_DOMINIO_REAL/healthz`.
+Compruebe localmente <http://127.0.0.1:8000/healthz> y, si usa un proveedor público, `https://SU_DOMINIO_REAL/healthz`.
+Ejecute `python scripts/connectivity.py check` y `python scripts/connectivity.py probe` (este último necesita Internet).
 
-| Problema                           | Causa o comprobación                                                                                                              |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| Docker no inicia                   | Verificar Docker Desktop, motor Linux y `docker info`.                                                                            |
-| Puerto ocupado                     | Cerrar proceso previo o modificar `VANTRA_PORT`/`TWILIO_WEBHOOK_PORT`; actualizar túnel si cambia 8000.                           |
-| Cambios de `.env` no aplicados     | Ejecutar `docker compose up -d --force-recreate`.                                                                                 |
-| Cambios de código no aplicados     | Ejecutar `docker compose up -d --build`.                                                                                          |
-| Gradio sigue en DEMO               | Comprobar `VANTRA_MODE=LIVE`, `.env` correcto y recreación de contenedor.                                                         |
-| Claude aparentemente no se usa     | Algunas consultas se resuelven con Python; probar consulta abierta y verificar credencial/modelo/cuota.                           |
-| Deepgram no transcribe             | Autorizar audio, comprobar LIVE, clave, modelo, formato y logs.                                                                   |
-| Azure no produce sonido            | Activar casilla de TTS, confirmar clave, región exacta, voz y cuota.                                                              |
-| No responde `/healthz`             | Verificar servicio `twilio-webhook` y puerto 8000.                                                                                |
-| `/healthz` público no responde     | ngrok cerrado, dominio cambiado o túnel dirigido a un puerto incorrecto.                                                          |
-| `TWILIO_PUBLIC_BASE_URL` inválida  | Debe ser solo `https://host`, sin rutas ni consulta.                                                                              |
-| Llamada bloqueada por aplicación   | Revisar modo, activación, consentimientos, lista permitida, horario, DNC y límites. No suprimir controles para resolver un fallo. |
-| Llamada creada sin audio o cortada | Revisar WebSocket `/twilio/media`, conectividad WSS, Twilio Debugger, Deepgram streaming y TTS μ-law/8 kHz.                       |
-| Más llamadas bloqueadas tras error | Una petición incierta puede estar activa; confirmar en Twilio Console **antes** de reintentar. No borrar SQLite/DNC.              |
+| Problema                                     | Causa o comprobación                                                                                                                                                     |
+|----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Docker no inicia                             | Verificar Docker Desktop, motor Linux y `docker info`.                                                                                                                   |
+| Puerto ocupado                               | Cerrar proceso previo o modificar `VANTRA_PORT`/`TWILIO_WEBHOOK_PORT`; actualizar túnel si cambia 8000.                                                                  |
+| Cambios de `.env` no aplicados               | Ejecutar `docker compose up -d --force-recreate`.                                                                                                                        |
+| Cambios de código no aplicados               | Ejecutar `docker compose up -d --build`.                                                                                                                                 |
+| Gradio sigue en DEMO                         | Comprobar `VANTRA_MODE=LIVE`, `.env` correcto y recreación de contenedor.                                                                                                |
+| Claude aparentemente no se usa               | Algunas consultas se resuelven con Python; probar consulta abierta y verificar credencial/modelo/cuota.                                                                  |
+| Deepgram no transcribe                       | Autorizar audio, comprobar LIVE, clave, modelo, formato y logs.                                                                                                          |
+| Azure no produce sonido                      | Activar casilla de TTS, confirmar clave, región exacta, voz y cuota.                                                                                                     |
+| No responde `/healthz`                       | Verificar servicio `twilio-webhook` y puerto 8000.                                                                                                                       |
+| `/healthz` público no responde               | URL pública no coincide, ngrok/cloudflared apagado, Caddy sin DNS o TLS, proxy encaminado a host incorrecto.                                                             |
+| Cloudflare devuelve 403, 1015 o desafío web  | Revisar Cloudflare Access y reglas WAF/Bot/Rate Limiting de las rutas Twilio; no desactivar validación de firmas FastAPI.                                                |
+| ngrok muestra 404 o servicio no alcanzable   | Comprobar dominio reservado y `twilio-webhook:8000` (no `localhost` interno).                                                                                            |
+| Caddy no obtiene certificado                 | Comprobar DNS, puertos TCP 80/443, firewall, IP pública y `CADDY_EMAIL`.                                                                                                 |
+| Cambio de proveedor no surtió efecto         | Detener overlay anterior con `python scripts/connectivity.py down --provider ANTIGUO`, modificar `.env`, `check` y `up`.                                                 |
+| WebSocket externo rechaza sin firma HTTP 403 | Es lo **esperado** para una prueba de seguridad; no significa que una llamada válida falle.                                                                              |
+| `TWILIO_PUBLIC_BASE_URL` inválida            | Debe ser solo `https://host`, sin rutas ni consulta.                                                                                                                     |
+| Llamada bloqueada por aplicación             | Revisar modo, activación, consentimientos, lista permitida, horario, DNC y límites. No suprimir controles para resolver un fallo.                                        |
+| Llamada creada sin audio o cortada           | Revisar WebSocket `/twilio/media`, conectividad WSS, Twilio Debugger, Deepgram streaming y TTS μ-law/8 kHz.                                                              |
+| Más llamadas bloqueadas tras error           | El sistema intenta conciliar automáticamente con Twilio los SID que figuran activos. Si Twilio aún está activo o no responde, mantiene el bloqueo. No borrar SQLite/DNC. |
+
+## Llamada terminada en Twilio pero `queued` en SQLite
+
+Una notificación de cierre puede perderse o adelantarse a la respuesta de creación. En esta versión, el webhook firmado
+asocia los estados con `call_id` y, antes de reservar una nueva llamada, se consulta el estado real de los SID activos.
+También puede sincronizar desde Gradio con **Consultar estado**.
+
+Sin realizar llamadas, en PyCharm/Docker:
+
+```powershell
+docker compose exec vantra python -m scripts.reconcile_calls
+# GET a Twilio: puede cambiar estados locales únicamente con confirmación remota
+docker compose exec vantra python -m scripts.reconcile_calls --check
+```
+
+- `completed`, `busy`, `failed`, `no-answer` o `canceled`: se actualiza SQLite y deja de ocupar el cupo de
+  simultaneidad.
+- `queued`, `initiated`, `ringing`, `in-progress`: se mantiene el bloqueo.
+- `reserved`/`initiated` sin SID, HTTP 401, timeout o respuesta no verificable: se mantiene el bloqueo. Revise Twilio
+  Console antes de cualquier intervención manual.
+
+El límite diario de intentos es **independiente**: aunque se libere la simultaneidad, los intentos previos continúan
+sumando. Nunca ejecute `docker compose down -v` para resolverlo; borraría también la lista de exclusión.
 
 ## Twilio: error HTTP al iniciar llamada
 
@@ -56,7 +85,14 @@ código numérico Twilio sin imprimir la respuesta íntegra.
 
 La ruta Twilio debe ser `wss://SU_DOMINIO_REAL/twilio/media`. Un error de handshake (por ejemplo, 31920) requiere
 revisar el túnel y la respuesta WebSocket. Si el webhook de estados responde 403, compruebe `TWILIO_PUBLIC_BASE_URL`,
-host realmente utilizado por ngrok y credenciales; **no desactive la validación de firmas** para hacer pasar la prueba.
+host público utilizado por el proxy y credenciales; **no desactive la validación de firmas** para hacer pasar la prueba.
+
+## Prueba de conectividad sin gastos telefónicos
+
+`python scripts/connectivity.py probe` verifica `GET /healthz` por HTTPS y que `/twilio/media` rechace un WebSocket
+**sin** `X-Twilio-Signature`. Si responde HTTP 403, el bloqueo de conexiones no autenticadas funciona. **No confirma**
+el streaming legítimo ni las APIs de voz. No publique la salida de `docker compose config`, que puede revelar variables
+sensibles.
 
 ## Qué registrar para soporte
 

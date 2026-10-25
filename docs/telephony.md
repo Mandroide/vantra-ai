@@ -1,131 +1,208 @@
-# Telefonía saliente autorizada: Twilio y República Dominicana
+# Telefonía de Vantra AI: Twilio, túneles y acceso HTTPS directo
 
-La pestaña **«Llamada REAL · piloto restringido»** inicia una llamada telefónica manual mediante Twilio. El sistema **no
-realiza campañas masivas** y su integración con Deepgram, Claude y Azure aún exige validación integral con los
-proveedores. Para operar con personas reales se necesitan consentimiento documentado, revisión legal y controles de
-acceso; este procedimiento se limita a pruebas voluntarias.
+Esta guía configura **llamadas salientes manuales** a números dominicanos preautorizados, conectadas a Twilio Media
+Streams. No es un marcador masivo ni un servicio bancario de producción. El chat de Gradio se mantiene accesible **solo
+en localhost**; la única aplicación que se publica es el receptor FastAPI. La llamada conversacional a un compañero
+reportada por el equipo es evidencia de un piloto, pero **no certifica** seguridad, rendimiento ni disponibilidad de una
+solución comercial.
 
-## 1. Preparar Twilio
+## Flujo de telefonía
 
-1. Habilite **Programmable Voice** en una cuenta que permita realizar llamadas mediante API y usar Media Streams
-   bidireccionales. Las cuentas Trial pueden tener restricciones para `<Connect><Stream>` y la creación de llamadas.
-2. Configure un número de origen (`TWILIO_FROM_NUMBER`) que pueda realizar llamadas salientes; compruebe su tipo,
-   permisos y requisitos de caller ID.
-3. Verifique en Twilio Console los **Voice Geographic Permissions** para República Dominicana y el estado de
-   facturación/cuota.
-4. Para un plan Trial, compruebe las restricciones de números destinatarios verificados. No intente eludir las
-   limitaciones del proveedor.
-5. Obtenga `Account SID` y `Auth Token` de la misma cuenta, sin registrarlos en Git ni en capturas públicas.
+```text
+Operador en Gradio (localhost:7860)
+    -> consentimiento + lista autorizada + DNC + límites
+    -> API REST Twilio: llamada saliente al teléfono de prueba (+1809/+1829/+1849)
+    -> webhook de estado HTTPS /twilio/status
+    -> Media Streams WSS /twilio/media
+    -> FastAPI -> Deepgram streaming -> Claude y herramientas -> Azure TTS μ-law 8 kHz
+```
 
-El destino debe tener formato E.164: **`+1809XXXXXXX`, `+1829XXXXXXX` o `+1849XXXXXXX`** (siete dígitos tras el
-prefijo). Por seguridad, el software rechaza otros prefijos.
+Twilio necesita una **URL pública HTTPS persistente** para el webhook y un endpoint **WSS** para el audio; Docker por sí
+solo no los proporciona. La aplicación genera los dos endpoints a partir de `TWILIO_PUBLIC_BASE_URL`. El proveedor de
+acceso público **no altera el agente**. Ver [architecture.md](architecture.md).
 
-## 2. Configurar `.env`
+## 1. Credenciales y política del piloto
+
+Configure en `.env`:
 
 ```dotenv
 VANTRA_MODE=LIVE
 TWILIO_CALLS_ENABLED=false
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+TWILIO_TEST_NUMBERS=
+TWILIO_PUBLIC_BASE_URL=
 TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=false
 TWILIO_DAILY_CALL_LIMIT=3
-TWILIO_ACCOUNT_SID=AC_REEMPLAZAR_CON_SID_REAL
-TWILIO_AUTH_TOKEN=REEMPLAZAR
-TWILIO_FROM_NUMBER=+1XXXXXXXXXX
-TWILIO_PUBLIC_BASE_URL=
-TWILIO_TEST_NUMBERS=+1809XXXXXXX
 ```
 
-`TWILIO_TEST_NUMBERS` admite **varios números separados por comas**, siempre que exista autorización previa verificable
-para cada titular. Complete también `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_SPEECH_KEY` y `AZURE_SPEECH_REGION`;
-revise [configuration.md](configuration.md). Nunca publique números reales en ejemplos ni en el repositorio.
+También necesita `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_SPEECH_KEY` y `AZURE_SPEECH_REGION`. Utilice el mismo
+Account SID y Auth Token de Twilio para iniciar llamadas y verificar firmas. El número origen debe tener capacidad
+Voice. Compruebe **Voice Geographic Permissions** para República Dominicana, las condiciones de la cuenta y las cuotas.
+Las cuentas Trial pueden limitar números verificados y Media Streams. **No publique `.env`, registros con números ni
+capturas con secretos.**
 
-## 3. Levantar Docker y exponer FastAPI con ngrok
+Destinatarios: exclusivamente E.164 `+1809XXXXXXX`, `+1829XXXXXXX`, `+1849XXXXXXX`. `TWILIO_TEST_NUMBERS` enumera
+contactos con consentimiento previo comprobable. Una casilla de confirmación no reemplaza la evidencia del
+consentimiento. Existe exclusión DNC, máximo de una llamada simultánea, un límite de **1 a 10 intentos diarios**
+(predeterminado 3, incluyendo fallos del proveedor) y horario local de lunes a viernes 09:00–17:59. Para una prueba
+excepcional y consentida fuera de horario puede configurarse `TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=true`; no elimina la
+normativa aplicable.
 
-Desde la raíz del proyecto, en PyCharm:
+## 2. Elegir una sola conectividad
 
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=80 twilio-webhook
-```
+Hay tres archivos que se **combinan** con `compose.yaml`; ninguno se utiliza solo. Seleccione el proveedor en `.env` con
+`CONNECTIVITY_PROVIDER=ngrok|cloudflare|direct`. Se puede ejecutar con `python scripts/connectivity.py` (o
+`uv run python ...`). El script valida coherencia y ejecuta Compose sin almacenar tokens adicionales.
 
-Compruebe **http://127.0.0.1:8000/healthz**. Después instale ngrok desde <https://ngrok.com/download>, obtenga un
-authtoken en su panel y ejecútelo en una terminal separada:
+### A. ngrok en Docker (recomendado para desarrollo)
 
-```bash
-ngrok config add-authtoken SU_TOKEN_PRIVADO
-ngrok http 8000
-```
-
-No coloque el token real en el repositorio. ngrok mostrará una URL pública con HTTPS, por ejemplo
-`https://ejemplo.ngrok-free.app` (URL ilustrativa). Copie **solo la base HTTPS**:
+Reserve un dominio de desarrollo persistente en su cuenta ngrok; ejemplo ilustrativo: `https://ejemplo.ngrok-free.dev`.
+Copie su token en `.env`:
 
 ```dotenv
-TWILIO_PUBLIC_BASE_URL=https://ejemplo.ngrok-free.app
+CONNECTIVITY_PROVIDER=ngrok
+NGROK_AUTHTOKEN=SU_TOKEN
+TWILIO_PUBLIC_BASE_URL=https://ejemplo.ngrok-free.dev
 ```
 
-La aplicación construye `https://.../twilio/status` y `wss://.../twilio/media`; **no agregue rutas, puerto, `/healthz`
-ni `wss://` a la variable base**. Verifique en el navegador `https://SU_DOMINIO_REAL/healthz`. Esto comprueba la
-conectividad, **no la respuesta de Twilio o la calidad de una llamada**.
+Comandos desde PyCharm, en la raíz del repositorio:
 
-Si ngrok cambia el dominio público, actualice la variable y recree ambos servicios:
-`docker compose up -d --force-recreate`. El túnel debe apuntar al puerto 8000, **nunca al 7860 de Gradio**. Mantenga
-abierto ngrok mientras prueba.
+```powershell
+python scripts/connectivity.py check
+python scripts/connectivity.py up
+python scripts/connectivity.py status
+```
 
-## 4. Verificación antes de marcar
+Equivalente explícito: `docker compose -f compose.yaml -f compose.ngrok.yaml up -d --build`. ngrok se conecta **dentro
+de la red Docker** a `http://twilio-webhook:8000`. No hace falta ngrok instalado en Windows ni `ngrok http 8000` en otra
+terminal.
 
-- DEMO y LIVE de voz funcionan previamente por Gradio (modo, STT, LLM en consultas abiertas y TTS).
-- La cuenta de Twilio tiene permiso de salida, saldo/cuota y soporte de WebSocket bidireccional.
-- El número de origen está autorizado y el destino es del titular que dio consentimiento **antes** de la llamada.
-- El destino figura en `TWILIO_TEST_NUMBERS`, no está en DNC y cumple los permisos geográficos.
-- FastAPI y ngrok responden desde el dominio público; la máquina y los contenedores están protegidos.
-- La conversación se presenta como prueba con Banco Demo **ficticio** y reconoce que el audio pasa por servicios
-  externos.
+### B. Cloudflare Tunnel en Docker (hostname propio)
 
-Puede comprobar las variables locales con `uv run python scripts/check_twilio_setup.py` (en el host con uv). Ese script
-**no crea llamadas ni verifica facturación o permisos de Twilio**.
-
-## 5. Primera llamada controlada
-
-1. Modifique `.env` a `TWILIO_CALLS_ENABLED=true` **solo después** de completar las verificaciones.
-2. Recree los servicios: `docker compose up -d --force-recreate`.
-3. Abra <http://127.0.0.1:7860> → **Llamada REAL · piloto restringido**.
-4. Introduzca el destino E.164 autorizado, confirme ambas casillas y seleccione **«Iniciar UNA llamada real»**.
-5. Observe el estado en Gradio, Twilio Console y `docker compose logs -f twilio-webhook`. La aceptación de Twilio **no
-   significa que se haya contestado**.
-6. Compruebe, con el participante, el saludo de identificación de IA, el audio de ambos sentidos, la finalización y la
-   posibilidad de exclusión DNC.
-7. Al terminar, desactive `TWILIO_CALLS_ENABLED`, recree contenedores y documente errores, latencias y costos realmente
-   observados.
-
-**Límites técnicos:** una llamada simultánea, límite diario configurable entre 1 y 10 intentos
-(`TWILIO_DAILY_CALL_LIMIT`, predeterminado: 3), duración máxima de 180 segundos y horario por defecto de lunes a
-viernes, 09:00–17:59 (`America/Santo_Domingo`). Para pruebas **manuales previamente autorizadas** fuera de horario
-establezca temporalmente:
+Cree un túnel **administrado** en el panel de Cloudflare con un dominio que controle. Configure **Public Hostname**, por
+ejemplo `voice.tudominio.com`, apuntando a `http://twilio-webhook:8000` (no a `localhost:8000` ni a `vantra:7860`).
+Copie el token del conector:
 
 ```dotenv
-TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=true
+CONNECTIVITY_PROVIDER=cloudflare
+CLOUDFLARE_TUNNEL_TOKEN=SU_TOKEN
+TWILIO_PUBLIC_BASE_URL=https://voice.tudominio.com
 ```
 
-Luego `docker compose up -d --force-recreate`. Esta opción **solo desactiva la regla horaria local**; conserva
-consentimiento, lista positiva, DNC y límites. Restáurela a `false` al terminar. No sustituye las normas de
-comunicaciones comerciales aplicables.
+Ejecute `python scripts/connectivity.py check` y después `python scripts/connectivity.py up`. Equivale a
+`docker compose -f compose.yaml -f compose.cloudflare.yaml up -d --build`. Verifique que **WebSockets** estén permitidos
+y que Cloudflare Access, WAF, bots, CAPTCHA y otras reglas **no impidan a Twilio** conectar a `/twilio/status` y
+`/twilio/media`. La validación criptográfica de Twilio se realiza en FastAPI; no deshabilite firmas para sortear reglas
+del proxy.
 
-**Límite diario:** el contador considera todas las solicitudes reservadas, incluidas las que Twilio rechaza (por
-ejemplo, HTTP 401). Se reinicia a medianoche de Santo Domingo. Para ampliar temporalmente las pruebas a cinco intentos,
-configure `TWILIO_DAILY_CALL_LIMIT=5` en `.env` y ejecute `docker compose up -d --force-recreate`. No borre el volumen
-de SQLite para reiniciar el contador; podría borrar también la lista de exclusiones. Resolver primero el error del
-proveedor evita consumir más intentos.
+Un *Quick Tunnel* `trycloudflare.com` sirve para pruebas HTTP efímeras, **no** para un callback estable con Twilio:
+puede cambiar de URL entre arranques y el script lo rechaza.
 
-## 6. Diagnóstico y seguridad
+### C. Acceso directo con Caddy (servidor público)
 
-- Si Twilio rechaza iniciar llamada, registre únicamente **estado HTTP y código numérico Twilio**;
-  consulte [troubleshooting.md](troubleshooting.md) y **Twilio Console → Monitor → Debugger**. No reintente
-  automáticamente: una solicitud con timeout podría haberse aceptado.
-- Si Twilio crea la llamada pero no se escucha audio, examine `/twilio/media`, logs de WebSocket, credenciales/formatos
-  Deepgram y Azure, y restricciones de la cuenta.
-- Si un participante rechaza más comunicaciones, finalice y registre la exclusión DNC. No borre el volumen SQLite para
-  sortear un bloqueo.
-- Para esta demostración no hay transferencia efectiva a un operador humano, autenticación de usuarios ni garantías de
-  disponibilidad.
+Requiere un host con IP pública accesible, DNS `A`/`AAAA` a ese servidor y puertos **80 y 443** libres y habilitados
+(incluido el router/cortafuegos cuando corresponda). Configure:
 
-Referencias: [Twilio Calls API](https://www.twilio.com/docs/voice/api/call-resource), [Media Streams](https://www.twilio.com/docs/voice/media-streams), [Twilio Trial](https://www.twilio.com/docs/usage/trials/try-out-voice), [ngrok](https://ngrok.com/docs/).
+```dotenv
+CONNECTIVITY_PROVIDER=direct
+VANTRA_PUBLIC_HOST=voice.tudominio.com
+CADDY_EMAIL=operaciones@tudominio.com
+TWILIO_PUBLIC_BASE_URL=https://voice.tudominio.com
+```
+
+`python scripts/connectivity.py up` combina `compose.yaml` + `compose.direct.yaml`, añade el contenedor Caddy y utiliza
+`infra/Caddyfile`. Caddy gestiona TLS y el proxy WebSocket; solamente publica `/healthz` y `/twilio/*`, nunca la
+interfaz Gradio. `TWILIO_PUBLIC_BASE_URL` debe coincidir exactamente con el hostname de Caddy. **No intente usar este
+modo desde un equipo tras CGNAT sin puertos accesibles.**
+
+## 3. Cambio de proveedor y diagnóstico
+
+**Nunca mantenga dos túneles activos a la vez para el mismo entorno.** Antes de cambiar, detenga las llamadas, guarde el
+estado de la llamada y ejecute:
+
+```powershell
+python scripts/connectivity.py down --provider ngrok
+# Edite .env: cambie proveedor, URL y sus credenciales.
+python scripts/connectivity.py check
+python scripts/connectivity.py up
+```
+
+Comprobación local (sin llamadas): `http://127.0.0.1:8000/healthz` y `docker compose ps`. La prueba externa automática,
+con conectividad de Internet, es:
+
+```powershell
+python scripts/connectivity.py probe
+```
+
+Comprueba `https://DOMINIO/healthz` y que `wss://DOMINIO/twilio/media` **rechaza un WebSocket sin firma** (`HTTP 403`
+esperado). Esto **no confirma** que un WebSocket legítimo o los proveedores de voz estén funcionando: para eso hay que
+hacer una llamada real autorizada y revisar estados y logs.
+
+Para logs del túnel:
+
+```powershell
+docker compose -f compose.yaml -f compose.ngrok.yaml logs --tail=100 ngrok
+docker compose -f compose.yaml -f compose.cloudflare.yaml logs --tail=100 cloudflared
+docker compose -f compose.yaml -f compose.direct.yaml logs --tail=100 caddy
+```
+
+`docker compose logs --tail=100 twilio-webhook` sirve para el webhook; `POST /twilio/status 200` únicamente confirma la
+recepción del callback, **no una conversación de voz**. En Twilio Console revise `queued` → `ringing` → `in-progress` →
+`completed`, y los fallos `busy`, `failed`, `no-answer`, junto con respuestas SIP y códigos Q.850. Si el teléfono nunca
+sonó, investigue el operador y la ruta internacional antes de modificar Deepgram/Claude/Azure.
+
+## 4. Recuperación automática del estado y bloqueo por simultaneidad
+
+Las notificaciones de Twilio pueden llegar antes de que la llamada tenga un Call SID guardado o pueden perderse si el
+túnel estuvo caído. Para reducir bloqueos falsos:
+
+- Cada llamada saliente incluye `?call_id=<identificador aleatorio>` en **su propio** `StatusCallback`, firmado por
+  Twilio. El servidor verifica la firma utilizando la URL completa y enlaza el Call SID con la reserva SQLite sin
+  confiar en cabeceras Host.
+- Al intentar reservar otra llamada cuando SQLite muestra una activa, `src/telephony.py` ejecuta **GET a Twilio** para
+  cualquier Call SID activo. Si confirma `completed`, `busy`, `no-answer`, `failed` o `canceled`, actualiza la base de
+  datos y vuelve a evaluar el límite dentro de una transacción SQLite.
+- Si Twilio responde `queued`, `initiated`, `ringing` o `in-progress`, si la solicitud falla o si el registro no tiene
+  SID, **no libera el cupo**. Se prohíben reintentos automáticos de marcación.
+- **Consultar estado** en Gradio sincroniza una llamada con SID. Las consultas GET no generan nuevas llamadas; el límite
+  diario sigue contando todas las reservas originales, incluidas las fallidas.
+
+Para revisar llamadas activas desde PyCharm, usando la versión Docker actual:
+
+```powershell
+docker compose exec vantra python -m scripts.reconcile_calls
+# Consulta Twilio para cada SID activo y actualiza únicamente estados verificados:
+docker compose exec vantra python -m scripts.reconcile_calls --check
+```
+
+El comando no muestra números de teléfono ni Auth Tokens. Si aparece un registro sin SID (`reserved` o un timeout de
+creación), se necesita verificar **manualmente** en Twilio Console el historial antes de corregirlo; no borre SQLite ni
+la lista DNC. Una operación de cambio de estado manual solo es aceptable después de confirmar con evidencia que no
+existe una llamada activa. Los registros históricos no se eliminan.
+
+### Validación tras actualizar el repositorio
+
+Ejecute `docker compose up -d --build --force-recreate` desde PyCharm. Compruebe
+`docker compose logs --tail=100 twilio-webhook` y revise el estado con el comando anterior **antes** de lanzar otra
+llamada autorizada. El código corregido cubre carreras de callback y bloqueos por estados terminales, pero la ruta real
+a Twilio debe validarse desde su propia cuenta.
+
+## 4. Seguridad de webhooks y WebSocket
+
+- Se valida `X-Twilio-Signature` con HMAC, token de Twilio y **URL pública completa (incluida la query firmada)**; nunca
+  se confía en un `Host` enviado por el cliente. WebSocket admite la variante con barra final recomendada por Twilio.
+- El WebSocket exige firma válida y un `call_id` con `nonce` de un solo flujo asociado a la llamada iniciada en el
+  sistema. No se admite abrir arbitrariamente conversaciones entrantes.
+- Caddy aplica una lista explícita de rutas; los túneles exponen el servidor FastAPI, **no Gradio**. `/readyz` solo está
+  disponible localmente en FastAPI y no revela claves.
+- Solo se admiten llamadas manuales a la lista positiva. No habilite campaña masiva ni desplegue la UI en Internet sin
+  autenticación, control de acceso y revisión legal.
+- FastAPI no registra audio ni transcripciones: registra estado Twilio, inicio/fin de stream y tiempos parciales de
+  agente y síntesis usando un identificador seudonimizado `call_ref`. Son **tiempos internos**, no latencia total ni
+  costo facturado. Los logs pueden contener metadatos de operación y requieren control de acceso. La retención y los
+  registros de los proveedores externos requieren revisión independiente.
+
+**Documentación
+oficial:** [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), [Twilio: validación de solicitudes](https://www.twilio.com/docs/usage/security), [ngrok Docker](https://ngrok.com/download/docker), [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/get-started/), [Caddy HTTPS](https://caddyserver.com/docs/automatic-https).

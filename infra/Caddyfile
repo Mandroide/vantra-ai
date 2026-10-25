@@ -1,0 +1,14 @@
+{
+  email {$CADDY_EMAIL}
+}
+
+{$VANTRA_PUBLIC_HOST} {
+  encode zstd gzip
+  @twilio path /twilio/status /twilio/media /healthz
+  handle @twilio {
+    reverse_proxy twilio-webhook:8000
+  }
+  handle {
+    respond "Not Found" 404
+  }
+}

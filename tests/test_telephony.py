@@ -272,26 +272,200 @@ def test_twilio_http_error_without_json_or_response(configured):
     assert 'abc' not in msg
 
 
-def test_daily_limit_default_three_includes_failed_attempts(configured):
-    # Un HTTP 401 puede dejar un intento en estado error; igualmente cuenta para el limite.
-    for _ in range(3):
-        call_id, _ = phone._reserve(ALLOW)
-        phone.update_call(call_id, 'error')
-    with pytest.raises(phone.CallPolicyError, match='3 intentos'):
-        phone._reserve(ALLOW)
+class FakeCallLookup:
+    """Respuesta mínima de consulta GET /Calls/{sid}.json (sin contactar Twilio)."""
+
+    def __init__(self, status: str, sid: str = SID, http_status: int = 200):
+        self.status = status
+        self.sid = sid
+        self.status_code = http_status
+
+    def raise_for_status(self):
+        if self.status_code != 200:
+            import requests
+            raise requests.exceptions.HTTPError('bad response')
+
+    def json(self):
+        return {'status': self.status, 'sid': self.sid}
 
 
-def test_daily_limit_can_be_raised_temporarily(configured, monkeypatch):
-    monkeypatch.setenv('TWILIO_DAILY_CALL_LIMIT', '5')
-    for _ in range(5):
-        call_id, _ = phone._reserve(ALLOW)
-        phone.update_call(call_id, 'error')
-    with pytest.raises(phone.CallPolicyError, match='5 intentos'):
-        phone._reserve(ALLOW)
+def test_reconcile_terminal_releases_slot_without_new_live_get(configured, monkeypatch):
+    first = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    queries = []
+
+    def fetch(url, **kwargs):
+        queries.append(url)
+        assert url.endswith('/Calls/' + SID + '.json')
+        assert kwargs['auth'] == (ACCOUNT, 'test-only-auth-token')
+        return FakeCallLookup('completed')
+
+    assert phone.reconcile_active_calls(transport=fetch)
+    assert len(queries) == 1
+    assert phone.get_call(first['id'])['status'] == 'completed'
+    # Una nueva reserva es segura sin consultar a Twilio de nuevo.
+    monkeypatch.setattr(FakeResponse, 'json', lambda self: {'sid': 'CA' + '4' * 32})
+    next_call = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    assert next_call['status'] == 'queued'
 
 
-@pytest.mark.parametrize('bad', ['0', '11', '-1', 'no', '3.5', ''])
-def test_daily_limit_requires_reasonable_value(configured, monkeypatch, bad):
-    monkeypatch.setenv('TWILIO_DAILY_CALL_LIMIT', bad)
-    with pytest.raises(phone.CallPolicyError, match='TWILIO_DAILY_CALL_LIMIT'):
-        phone._reserve(ALLOW)
+def test_start_call_auto_reconciles_then_reserves(configured, monkeypatch):
+    previous = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    lookups = []
+
+    def fake_lookup(url, **kwargs):
+        lookups.append(url)
+        return FakeCallLookup('busy')
+
+    monkeypatch.setattr(FakeResponse, 'json', lambda self: {'sid': 'CA' + '5' * 32})
+    replacement = phone.start_test_call(
+        ALLOW, confirmed=True, transport=fake_post, status_transport=fake_lookup
+    )
+    assert len(lookups) == 1
+    assert phone.get_call(previous['id'])['status'] == 'busy'
+    assert replacement['status'] == 'queued'
+    assert replacement['id'] != previous['id']
+
+
+@pytest.mark.parametrize('remote_status', ['queued', 'initiated', 'ringing', 'in-progress'])
+def test_reconcile_never_releases_remote_active(configured, remote_status):
+    active = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    with pytest.raises(phone.ActiveCallError, match='no verificable'):
+        phone.start_test_call(
+            ALLOW, confirmed=True, transport=fake_post,
+            status_transport=lambda *a, **k: FakeCallLookup(remote_status),
+        )
+    assert phone.get_call(active['id'])['status'] not in phone.TERMINAL
+
+
+@pytest.mark.parametrize('problem', ['timeout', '401', 'unknown', 'sid_mismatch'])
+def test_reconcile_fails_closed_when_lookup_is_unreliable(configured, problem):
+    import requests
+    active = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+    def broken_lookup(url, **kwargs):
+        if problem == 'timeout':
+            raise requests.exceptions.ReadTimeout('secret-sensitive')
+        if problem == '401':
+            return FakeCallLookup('completed', http_status=401)
+        if problem == 'unknown':
+            return FakeCallLookup('deleting')
+        return FakeCallLookup('completed', sid='CA' + 'b' * 32)
+
+    with pytest.raises(phone.ActiveCallError):
+        phone.start_test_call(
+            ALLOW, confirmed=True, transport=fake_post,
+            status_transport=broken_lookup,
+        )
+    assert phone.get_call(active['id'])['status'] == 'queued'
+
+
+def test_reserved_without_sid_requires_manual_confirmation(configured):
+    call_id, _ = phone._reserve(ALLOW)
+    assert phone.get_call(call_id)['status'] == 'reserved'
+    assert not phone.reconcile_active_calls(transport=lambda *a, **k: pytest.fail('No GET'))
+    with pytest.raises(phone.ActiveCallError):
+        phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+
+
+def test_read_only_refresh_verifies_terminal_and_does_not_start_new_call(configured):
+    first = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    result = phone.refresh_call_status(
+        first['id'], transport=lambda *a, **k: FakeCallLookup('no-answer')
+    )
+    assert result['status'] == 'no-answer'
+    # Una vez terminal, no consulta Twilio nuevamente.
+    result = phone.refresh_call_status(
+        first['id'], transport=lambda *a, **k: pytest.fail('No further requests')
+    )
+    assert result['status'] == 'no-answer'
+
+
+def test_signed_early_webhook_before_call_sid_is_saved(configured):
+    from urllib.parse import urlparse
+
+    def respond_after_callback(url, **kwargs):
+        callback_url = kwargs['data']['StatusCallback']
+        parsed = urlparse(callback_url)
+        assert parsed.query.startswith('call_id=')
+        fields = {'CallSid': SID, 'CallStatus': 'completed'}
+        contents = callback_url + ''.join(k + v for k, v in sorted(fields.items()))
+        signature = base64.b64encode(hmac.new(
+            b'test-only-auth-token', contents.encode(), hashlib.sha1
+        ).digest()).decode()
+        with TestClient(server.app) as client:
+            response = client.post(
+                parsed.path + '?' + parsed.query, data=fields,
+                headers={'X-Twilio-Signature': signature},
+            )
+            assert response.status_code == 200
+        return FakeResponse()
+
+    first = phone.start_test_call(ALLOW, confirmed=True, transport=respond_after_callback)
+    assert first['status'] == 'completed'
+    assert phone.get_call(first['id'])['call_sid'] == SID
+    assert phone.get_call(first['id'])['status'] == 'completed'
+
+
+def test_signature_requires_query_and_mismatched_sid_does_not_replace(configured):
+    first = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    path = '/twilio/status?call_id=' + first['id']
+    params = {'CallSid': 'CA' + '3' * 32, 'CallStatus': 'completed'}
+    url = phone.public_url(path)
+    content = url + ''.join(k + v for k, v in sorted(params.items()))
+    sig = base64.b64encode(hmac.new(
+        b'test-only-auth-token', content.encode(), hashlib.sha1
+    ).digest()).decode()
+    with TestClient(server.app) as client:
+        assert client.post(path, data=params).status_code == 403
+        assert client.post('/twilio/status', data=params,
+                           headers={'X-Twilio-Signature': sig}).status_code == 403
+        assert client.post(path, data=params,
+                           headers={'X-Twilio-Signature': sig}).status_code == 409
+    assert phone.get_call(first['id'])['status'] == 'queued'
+    assert phone.get_call(first['id'])['call_sid'] == SID
+
+
+def test_ambiguous_connection_error_does_not_unlock_call(configured):
+    import requests
+
+    def connection_dropped(url, **kwargs):
+        raise requests.exceptions.ConnectionError('simulated network dropped')
+
+    with pytest.raises(phone.CallPolicyError, match='NO repita'):
+        phone.start_test_call(ALLOW, confirmed=True, transport=connection_dropped)
+    assert phone._active_calls()[0]['call_sid'] is None
+    assert phone._active_calls()[0]['status'] == 'initiated'
+
+
+def test_successful_response_without_sid_keeps_reservation(configured):
+    class MissingSid:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'status': 'queued'}
+
+    with pytest.raises(phone.CallPolicyError, match='SID verificable'):
+        phone.start_test_call(ALLOW, confirmed=True,
+                              transport=lambda *args, **kwargs: MissingSid())
+    assert phone._active_calls()[0]['status'] == 'initiated'
+
+
+def test_late_callback_does_not_resurrect_completed_call(configured):
+    item = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    phone.update_call(item['id'], 'completed')
+    phone.update_call(item['id'], 'ringing', SID)
+    assert phone.get_call(item['id'])['status'] == 'completed'
+
+
+def test_admin_reconcile_cli_only_reads_by_default(configured, monkeypatch, capsys):
+    from scripts import reconcile_calls
+
+    item = phone.start_test_call(ALLOW, confirmed=True, transport=fake_post)
+    monkeypatch.setattr('sys.argv', ['reconcile_calls'])
+    assert reconcile_calls.main() == 0
+    result = capsys.readouterr().out
+    assert item['id'] in result
+    assert 'queued' in result
+    assert ALLOW not in result
+    assert phone.get_call(item['id'])['status'] == 'queued'

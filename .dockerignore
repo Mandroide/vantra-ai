@@ -26,3 +26,7 @@ dist/
 *.wav
 *.mp3
 *.log
+
+# Herramientas e infraestructura (no se necesitan en la imagen runtime)
+compose.*.yaml
+infra/

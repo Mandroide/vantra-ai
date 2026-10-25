@@ -7,8 +7,8 @@ from src.config import env
 from src.speech import transcribe_deepgram, speak_azure, speak_local
 from src.storage import counts
 from src.tools import check_contact_policy
-from src.telephony import start_test_call, stop_test_call, get_call, add_do_not_call, CallPolicyError, \
-    summarize_twilio_http_error
+from src.telephony import start_test_call, stop_test_call, get_call, refresh_call_status, add_do_not_call, \
+    CallPolicyError, summarize_twilio_http_error
 
 LIVE = env('VANTRA_MODE', 'DEMO').upper() == 'LIVE'
 
@@ -80,7 +80,7 @@ def call_real(number, prior_consent, authorized_recipient):
     try:
         result = start_test_call(number, confirmed=True)
         return f"Twilio recibió solicitud: {result['status']}. SID: {result['call_sid']}. Estado pendiente de confirmación.", \
-            result['id']
+        result['id']
     except (CallPolicyError, RuntimeError) as exc:
         return f'Bloqueado: {exc}', ''
     except requests.exceptions.HTTPError as exc:
@@ -102,8 +102,11 @@ def phone_block(number, authorization):
 def call_refresh(call_id):
     if not call_id:
         return 'No hay ninguna llamada iniciada desde esta sesión.'
-    item = get_call(call_id)
-    return (f"Estado registrado: {item['status']} · SID: {item['call_sid'] or 'pendiente'}" if item
+    try:
+        item = refresh_call_status(call_id)
+    except CallPolicyError as exc:
+        return f'No se pudo sincronizar: {exc}'
+    return (f"Estado verificado o local: {item['status']} · SID: {item['call_sid'] or 'pendiente'}" if item
             else 'No se encontró la llamada.')
 
 

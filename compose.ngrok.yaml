@@ -1,0 +1,15 @@
+# Añadir sobre compose.yaml. Solo FastAPI se publica; Gradio no se expone.
+services:
+  ngrok:
+    image: ngrok/ngrok:3
+    command: [ "http", "http://twilio-webhook:8000", "--url", "${TWILIO_PUBLIC_BASE_URL:?Establezca TWILIO_PUBLIC_BASE_URL=https://su-dominio-ngrok}" ]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Configure NGROK_AUTHTOKEN}
+    depends_on:
+      twilio-webhook:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

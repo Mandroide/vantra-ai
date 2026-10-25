@@ -1,98 +1,104 @@
-# Instalación, ejecución y flujo de desarrollo
+# Instalación y ejecución reproducible
 
-Esta guía parte de la raíz del repositorio y funciona desde la terminal integrada de **PyCharm** o una terminal normal.
-La vía recomendada para la demostración es **Docker Compose**; uv permite desarrollo y depuración directos.
+Este proyecto utiliza **Python 3.11 o 3.12**, uv y Docker Compose. Puede desarrollarse con PyCharm en Windows, Linux o
+macOS. **Gradio no requiere acceso público** y solo se expone en `127.0.0.1:7860`.
 
-## Requisitos
+## Preparación de PyCharm y Docker
 
-- Docker Desktop (Windows/macOS) o Docker Engine + Compose v2 (Linux). En Windows, motor de contenedores Linux
-  habilitado.
-- Acceso a Internet para obtener imágenes y dependencias.
-- Opcional: Python 3.11/3.12 y [uv](https://docs.astral.sh/uv/) para desarrollo nativo.
-- Claves de APIs y un túnel HTTPS **solo** para LIVE/telefonía, no para DEMO.
+1. Instale Docker Desktop/Engine con Compose v2 y compruebe `docker compose version`.
+2. Abra la carpeta que contiene `compose.yaml` en PyCharm y configure `.env`: copie `.env.example` únicamente si no
+   existe ya `.env`.
+3. Mantenga inicialmente `VANTRA_MODE=DEMO` y `TWILIO_CALLS_ENABLED=false`.
+4. Ejecute `docker compose up -d --build`; compruebe `docker compose ps` y abra `http://127.0.0.1:7860`.
+5. Consulte `http://127.0.0.1:8000/healthz` y `http://127.0.0.1:8000/readyz`. El primero indica disponibilidad HTTP; el
+   segundo solo confirma presencia básica de variables y nunca certifica las APIs externas.
 
-Verifique:
+Los servicios base son `vantra` (Gradio) y `twilio-webhook` (FastAPI). Ambos tienen healthchecks y una base SQLite
+persistente en volumen Docker. `docker compose down` **no** borra ese volumen; **no use** `down -v` si necesita
+conservar solicitudes y exclusiones DNC.
 
-```bash
-docker --version
-docker compose version
-docker info
-```
-
-## Ejecución inicial: DEMO
-
-1. Abra la carpeta que contiene `compose.yaml` en PyCharm.
-2. Cree `.env` a partir de `.env.example` (`Copy-Item .env.example .env` en PowerShell o `cp .env.example .env` en
-   bash). Si el archivo existe, consérvelo.
-3. Compruebe `VANTRA_MODE=DEMO` y `TWILIO_CALLS_ENABLED=false`.
-4. Ejecute:
+## Desarrollo local con uv
 
 ```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=80 vantra
-docker compose logs --tail=80 twilio-webhook
-```
-
-5. Abra <http://127.0.0.1:7860> y consulte: «¿Qué requisitos tiene la tarjeta?» y «Cotiza 300000 pesos a 36 meses».
-6. Verifique <http://127.0.0.1:8000/healthz>. Este endpoint no valida proveedores externos.
-
-`compose.yaml` levanta `vantra` (Gradio: 7860) y `twilio-webhook` (FastAPI: 8000); ambos puertos se publican únicamente
-en `127.0.0.1`. Comparten el volumen `vantra_state` para SQLite, incluidos estados telefónicos y exclusiones DNC.
-
-## Ciclo cotidiano de desarrollo
-
-```bash
-# Ver registros
-docker compose logs -f vantra
-docker compose logs -f twilio-webhook
-
-# Si cambia .env
-docker compose up -d --force-recreate
-
-# Si cambia código o Dockerfile
-docker compose up -d --build
-
-# Parar conservando datos
-docker compose down
-```
-
-Si cambia el puerto local `TWILIO_WEBHOOK_PORT`, actualice también la configuración de ngrok. Evite
-`docker compose down -v`: borra el volumen local y puede perder las exclusiones DNC.
-
-## Desarrollo nativo con uv
-
-```bash
-uv lock                         # necesario solo mientras falte uv.lock
+uv lock                 # generar y versionar uv.lock si todavía falta
 uv sync --group dev
 uv run python -m pytest -q
+uv run python scripts/run_evaluation.py
 uv run python app.py
 ```
 
-Para telefonía, arranque en otra terminal: `uv run uvicorn src.telephony_server:app --host 127.0.0.1 --port 8000`.
+Si ejecuta el receptor telefónico fuera de Docker, use una segunda terminal con
+`uv run uvicorn src.telephony_server:app --host 127.0.0.1 --port 8000`. El archivo `uv.lock` **no se incluye en esta
+entrega**; generarlo y versionarlo sigue siendo necesario para dependencias totalmente reproducibles.
+Consulte [configuration.md](configuration.md).
 
-**Pendiente de reproducibilidad:** `uv.lock` no está versionado en el paquete actual. Genérelo con acceso a PyPI,
-compruebe cambios, agréguelo a Git y cambie a `uv sync --locked --group dev`. Los comandos Docker y CI pueden resolver
-dependencias inicialmente, pero esto no equivale a resolución congelada.
+## Exposición pública para telefonía
+
+**No publique Gradio.** La telefonía real necesita HTTPS y WSS hacia FastAPI, y solo debe habilitarse para pruebas
+consentidas. Hay tres modos de acceso público independientes del agente:
+
+| Modo       | Archivos Docker                            | Requisitos                                 |
+|------------|--------------------------------------------|--------------------------------------------|
+| ngrok      | `compose.yaml` + `compose.ngrok.yaml`      | Authtoken, dominio de desarrollo reservado |
+| Cloudflare | `compose.yaml` + `compose.cloudflare.yaml` | Túnel administrado, dominio propio, token  |
+| Directo    | `compose.yaml` + `compose.direct.yaml`     | DNS público, puertos 80/443, Caddy         |
+
+Configure `.env`, ejecute `python scripts/connectivity.py check`, luego `python scripts/connectivity.py up`. Las
+comprobaciones son **offline**, salvo `probe` que verifica el acceso externo. Para cambiar proveedor, detenga primero el
+modo anterior; instrucciones completas en [telephony.md](telephony.md).
+
+## Git en Windows, macOS y Linux
+
+El repositorio incorpora [`.gitattributes`](../.gitattributes) para que los archivos de código, configuración y
+documentación se almacenen con finales de línea LF, adecuados para Docker y los hooks de pre-commit. Los scripts nativos
+de Windows usan CRLF; los audios y demás archivos binarios no se normalizan. Este archivo no contiene claves ni modifica
+`.env`.
+
+En un clon existente, tras introducir estos atributos, el equipo puede ejecutar `git add --renormalize .` y revisar
+`git diff --cached --check` antes de confirmar la normalización. No suba secretos ni grabaciones privadas; Git LFS queda
+fuera del MVP hasta que haya una necesidad justificada.
 
 ## Pruebas y calidad
 
 ```bash
-uv run python -m pytest -q --cov=src --cov=app --cov-report=term-missing
+uv run python -m pytest -q
 uv run ruff check .
-uv run ruff format --check .
-uv run pre-commit install
 uv run pre-commit run --all-files
 uv run python scripts/run_evaluation.py
+python scripts/connectivity.py check --provider ngrok
 ```
 
-Si el formateador identifica diferencias, aplique `uv run ruff format .` y revise los cambios. No confunda cobertura de
-código con calidad de voz o precisión del LLM. El workflow `.github/workflows/ci.yml` prueba Python 3.11/3.12,
-evaluación DEMO y construcción Docker sin desplegar ni consumir claves de proveedores. `.github/workflows/docker.yml`
-permite una ejecución manual adicional; Dependabot gestiona propuestas de actualización. No se usa Jenkins.
+La última orden exige valores de ejemplo o credenciales locales configuradas y solo comprueba la estructura, **no**
+solicita una llamada. GitHub Actions ejecuta pruebas con mocks y evaluación DEMO sin secretos de proveedores. Ningún
+pipeline inicia llamadas reales.
 
-## Próximos pasos
+## Actualización del repositorio y conciliación telefónica
 
-Configure los servicios mediante [configuration.md](configuration.md). Para llamadas de prueba autorizadas,
-siga [telephony.md](telephony.md) **después** de comprobar DEMO y LIVE por Gradio.
-Consulte [troubleshooting.md](troubleshooting.md) si algún servicio falla.
+Después de actualizar el código desde el ZIP, **conserve su `.env` y el volumen de SQLite**. Desde PyCharm:
+
+```powershell
+# Si usa ngrok/cloudflare/direct, continúe utilizando el perfil de su despliegue:
+python scripts/connectivity.py up
+# Revisa reservas locales sin consultar la API:
+docker compose exec vantra python -m scripts.reconcile_calls
+# Consulta Twilio y sincroniza solamente estados terminales comprobados:
+docker compose exec vantra python -m scripts.reconcile_calls --check
+```
+
+Si ya estaban iniciados los contenedores con una versión anterior, reconstruya antes con
+`docker compose up -d --build --force-recreate` usando los archivos Compose correspondientes a su proveedor. El modo
+LIVE necesita credenciales Twilio válidas para `--check`, **pero no crea llamadas**. Si el registro no tiene Call SID o
+Twilio no responde, conserva el bloqueo. Consulte [telephony.md](telephony.md) para el procedimiento seguro.
+
+## Parada y diagnóstico
+
+```bash
+docker compose ps
+docker compose logs --tail=100 vantra
+docker compose logs --tail=100 twilio-webhook
+docker compose down
+```
+
+Si levantó el sistema con overlay, deténgalo con `python scripts/connectivity.py down`, seleccionando el proveedor
+configurado. Conservar `.env` fuera del repositorio y no copiar salidas de `docker compose config` (puede incluir
+variables sensibles).

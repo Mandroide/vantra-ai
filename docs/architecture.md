@@ -22,7 +22,8 @@ flowchart TD
 
   GR[Botón manual en Gradio] --> T[Twilio REST]
   T --> PSTN[Teléfono autorizado]
-  PSTN <-->|Media Streams| WS[FastAPI / WebSocket]
+  PSTN <-->|Media Streams WSS| PROXY[ngrok / Cloudflare / Caddy]
+  PROXY <-->|HTTPS y WSS| WS[FastAPI / WebSocket]
   WS <-->|Audio 8 kHz μ-law| DGS[Deepgram streaming]
   WS --> S
   WS <-->|Audio sintetizado| AZ
@@ -30,16 +31,20 @@ flowchart TD
 
 ## Módulos
 
-| Archivo                   | Responsabilidad                                                                   |
-|---------------------------|-----------------------------------------------------------------------------------|
-| `app.py`                  | Interfaz, chat, consentimiento de audio, simulación y llamada manual restringida. |
-| `src/agent.py`            | Reglas, decisiones y uso de Claude cuando corresponda.                            |
-| `src/tools.py`            | Consulta del catálogo, cuotas y políticas deterministas.                          |
-| `src/speech.py`           | Audio grabado hacia Deepgram y síntesis Azure por archivo.                        |
-| `src/telephony.py`        | Validación RD E.164, DNC, allowlist, límites y solicitud Twilio REST.             |
-| `src/telephony_server.py` | Webhook de estado, WebSocket, streaming y síntesis telefónica.                    |
-| `src/storage.py`          | Registros SQLite del prototipo.                                                   |
-| `data/`                   | Información de prueba y escenarios sintéticos.                                    |
+| Archivo                                                                | Responsabilidad                                                                                        |
+|------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `app.py`                                                               | Interfaz, chat, consentimiento de audio, simulación y llamada manual restringida.                      |
+| `src/agent.py`                                                         | Reglas, decisiones y uso de Claude cuando corresponda.                                                 |
+| `src/tools.py`                                                         | Consulta del catálogo, cuotas y políticas deterministas.                                               |
+| `src/speech.py`                                                        | Audio grabado hacia Deepgram y síntesis Azure por archivo.                                             |
+| `src/telephony.py`                                                     | Validación RD E.164, DNC, allowlist, límites, solicitudes y reconciliación de estados con Twilio REST. |
+| `src/telephony_server.py`                                              | Webhook firmado de estado asociado al ID local, WebSocket, streaming y síntesis telefónica.            |
+| `scripts/reconcile_calls.py`                                           | Inspección local y consulta de estados remotos sin originar nuevas llamadas.                           |
+| `src/storage.py`                                                       | Registros SQLite del prototipo.                                                                        |
+| `scripts/connectivity.py`                                              | Selector ngrok/Cloudflare/direct y prueba pública HTTPS/WSS sin llamadas.                              |
+| `compose.ngrok.yaml`, `compose.cloudflare.yaml`, `compose.direct.yaml` | Servicios de acceso público opcionales.                                                                |
+| `infra/Caddyfile`                                                      | Proxy directo TLS que publica únicamente rutas de telefonía y healthz.                                 |
+| `data/`                                                                | Información de prueba y escenarios sintéticos.                                                         |
 
 ## Flujos de llamada
 
@@ -58,14 +63,22 @@ mensual y `n` meses. No supone seguros, impuestos ni comisiones y no constituye 
 aprueba ni rechaza préstamos ni consulta cuentas bancarias reales.
 
 Las restricciones telefónicas incorporan confirmación de consentimiento, lista permitida de `+1809/+1829/+1849`,
-exclusión DNC, horario, límite diario y máximo de una llamada simultánea. Son salvaguardas parciales, **no equivalen a
-cumplimiento normativo ni a autenticación de un servicio productivo**.
+exclusión DNC, horario, límite diario configurable de 1 a 10 intentos y máximo de una llamada simultánea. Son
+salvaguardas parciales, **no equivalen a cumplimiento normativo ni a autenticación de un servicio productivo**.
+
+La simultaneidad se controla mediante reserva transaccional SQLite. Si existe una llamada registrada como activa, la
+aplicación realiza una consulta **GET** al Call SID de Twilio antes de rechazar una nueva reserva; únicamente estados
+terminales confirmados liberan ese cupo. El webhook firmado incluye un `call_id` aleatorio en la URL de callback para
+asociar notificaciones aunque lleguen antes de recibirse la respuesta de creación. Estados sin SID, redes inaccesibles o
+datos inconsistentes mantienen el bloqueo. La actualización de estados es monotónica y no revive llamadas finalizadas.
 
 ## Operación y limitaciones
 
 La aplicación se ejecuta con uv o en Docker Compose (`vantra` en 7860 y `twilio-webhook` en 8000) y un volumen SQLite
-compartido. La puerta pública de ngrok debe dirigirse **solo a FastAPI**, no al panel Gradio. Las credenciales se
-configuran por entorno. No se debe exponer Gradio públicamente sin autenticación y control de costos.
+compartido. El túnel ngrok, el túnel Cloudflare o el proxy Caddy deben dirigirse **solo a FastAPI**, no al panel Gradio.
+Todos utilizan `TWILIO_PUBLIC_BASE_URL` y conservan firmas obligatorias y nonce. Los servicios base tienen healthchecks;
+`scripts/connectivity.py probe` comprueba HTTPS y un rechazo WSS sin firma, no la interoperabilidad LIVE. Las
+credenciales se configuran por entorno. No se debe exponer Gradio públicamente sin autenticación y control de costos.
 
 No existen integraciones con CRM bancario real, autorizaciones de identidad real, transferencia humana efectiva ni
 marcación por lotes. El código de los conectores **no demuestra por sí solo** llamadas ni latencias observadas; esas

@@ -1,0 +1,16 @@
+# Túnel administrado: configure Public Hostname -> http://twilio-webhook:8000
+# El hostname debe ser idéntico a TWILIO_PUBLIC_BASE_URL (sin ruta).
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: [ "tunnel", "--no-autoupdate", "run" ]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Configure CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      twilio-webhook:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

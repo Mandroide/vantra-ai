@@ -10,6 +10,9 @@ import asyncio
 import base64
 import json
 import logging
+import hashlib
+import re
+import time
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -18,7 +21,7 @@ import websockets
 
 from src.agent import Session, respond, normalize
 from src.config import env, key
-from src.telephony import (get_call_by_sid, public_url, claim_stream, mark_do_not_call,
+from src.telephony import (CALL_SID, get_call, get_call_by_sid, public_url, claim_stream, mark_do_not_call,
                            stop_test_call, twilio_valid_signature, update_call)
 
 log = logging.getLogger('vantra.telephony')
@@ -36,20 +39,55 @@ async def health():
     return {'ok': True, 'telephony_enabled': env('TWILIO_CALLS_ENABLED', 'false') == 'true'}
 
 
+@app.get('/readyz')
+async def ready():
+    # No autentica APIs externas: comprueba configuración esencial, sin exponer claves.
+    from urllib.parse import urlparse
+    enabled = env('TWILIO_CALLS_ENABLED', 'false').lower() == 'true'
+    base = env('TWILIO_PUBLIC_BASE_URL', '')
+    parsed = urlparse(base)
+    configured = (parsed.scheme == 'https' and bool(parsed.hostname)
+                  and all(bool(env(name, '')) for name in (
+                      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+                      'DEEPGRAM_API_KEY', 'ANTHROPIC_API_KEY', 'AZURE_SPEECH_KEY',
+                      'AZURE_SPEECH_REGION')))
+    # No devuelve secretos; Caddy no lo publica, pero un túnel puede enrutarlo.
+    return {'server_ready': True, 'twilio_configured': configured if enabled else False,
+            'twilio_enabled': enabled}
+
+
 @app.post('/twilio/status')
 async def status_callback(request: Request):
     # Usar URL pública configurada, NO Host manipulable ni X-Forwarded-Host del cliente.
     params = {str(k): str(v) for k, v in (await request.form()).items()}
     signature = request.headers.get('X-Twilio-Signature', '')
-    if not twilio_valid_signature(public_url('/twilio/status'), signature, params):
+    # Twilio firma también la query completa. Reconstruir con base canónica
+    # para no depender de cabeceras Host/X-Forwarded manipulables por el cliente.
+    query = request.scope.get('query_string', b'').decode('ascii')
+    callback_url = public_url('/twilio/status') + ('?' + query if query else '')
+    if not twilio_valid_signature(callback_url, signature, params):
         raise HTTPException(status_code=403, detail='Firma de Twilio inválida')
     sid = params.get('CallSid', '')
-    info = get_call_by_sid(sid)
+    if not CALL_SID.fullmatch(sid):
+        raise HTTPException(status_code=400, detail='Call SID inválido')
+    call_id = request.query_params.get('call_id', '')
+    # Este identificador viaja en el callback para cubrir la carrera donde
+    # Twilio notifica antes de que POST /Calls devuelva el SID a Gradio.
+    info = get_call(call_id) if re.fullmatch(r'[0-9a-f]{32}', call_id) else None
+    if info is None and not call_id:  # Compatibilidad con llamadas antiguas.
+        info = get_call_by_sid(sid)
     if info:
+        if info['call_sid'] and info['call_sid'] != sid:
+            raise HTTPException(status_code=409, detail='Call SID no corresponde a llamada')
         state = params.get('CallStatus', '')
         if state in {'queued', 'initiated', 'ringing', 'in-progress', 'completed',
                      'busy', 'failed', 'no-answer', 'canceled'}:
-            update_call(info['id'], state)
+            update_call(info['id'], state, sid)
+            log.info('twilio_status event=%s call_ref=%s', state,
+                     hashlib.sha256(sid.encode()).hexdigest()[:12])
+    else:
+        log.warning('twilio_status_unmatched call_ref=%s',
+                    hashlib.sha256(sid.encode()).hexdigest()[:12])
     return JSONResponse({'ok': True})
 
 
@@ -97,16 +135,20 @@ class CallBridge:
         self.worker: asyncio.Task | None = None
         self.dg = None
         self.utterances = 0
+        self.call_ref = hashlib.sha256(call_sid.encode()).hexdigest()[:12]
 
     async def _send_audio(self, text: str, *, goodbye=False):
         self.speaking = True
+        started = time.perf_counter()
         try:
             raw = await asyncio.wait_for(asyncio.to_thread(azure_mulaw_8k, text), timeout=25)
+            log.info('voice_tts call_ref=%s duration_ms=%.1f bytes=%d',
+                     self.call_ref, (time.perf_counter()-started)*1000, len(raw))
             # Twilio acepta cualquier tamaño, enviamos bloques pequeños para facilitar su búfer.
             for i in range(0, len(raw), 1600):
                 await self.websocket.send_json({
                     'event': 'media', 'streamSid': self.stream_sid,
-                    'media': {'payload': base64.b64encode(raw[i:i + 1600]).decode('ascii')}})
+                    'media': {'payload': base64.b64encode(raw[i:i+1600]).decode('ascii')}})
             self.hang_after_mark = goodbye
             await self.websocket.send_json({
                 'event': 'mark', 'streamSid': self.stream_sid,
@@ -155,8 +197,12 @@ class CallBridge:
             if self.utterances > 12:
                 await self._send_audio('Llegamos al límite de intervenciones de la prueba. Gracias.', goodbye=True)
                 return
+            started = time.perf_counter()
             result, self.session = await asyncio.wait_for(
                 asyncio.to_thread(respond, text, self.session, 'LIVE'), timeout=35)
+            log.info('voice_agent call_ref=%s duration_ms=%.1f outcome=%s',
+                     self.call_ref, (time.perf_counter()-started)*1000,
+                     'error' if result.status == 'PROVIDER_ERROR' else 'ok')
             if result.status == 'PROVIDER_ERROR':
                 await self._send_audio('El asistente no está disponible ahora. Finalizamos la llamada.', goodbye=True)
             else:
@@ -284,7 +330,12 @@ async def media_stream(ws: WebSocket):
             await ws.close(code=1008)
             return
         bridge = CallBridge(ws, call_id, sid, stream_sid)
-        await bridge.run()
+        log.info('voice_stream_started call_ref=%s', bridge.call_ref)
+        try:
+            await bridge.run()
+        finally:
+            log.info('voice_stream_ended call_ref=%s turns=%d',
+                     bridge.call_ref, bridge.utterances)
     except (asyncio.TimeoutError, WebSocketDisconnect):
         pass
     except Exception:

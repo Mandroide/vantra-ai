@@ -1,80 +1,65 @@
-# Configuración del entorno y proveedores
+# Configuración y secretos de Vantra AI
 
-Las variables están definidas en `.env.example` y se cargan desde `.env`. No copie claves dentro del código, de la
-imagen Docker, de GitHub ni de capturas de pantalla. Las claves de los proveedores deben disponer de permisos y límites
-de gasto adecuados.
+`.env.example` es el inventario de variables. Cree un `.env` local **fuera de Git** y no adjunte tokens, números
+completos ni audios privados a los informes. Docker Compose usa `.env` para interpolación y transmite cada variable
+declarada en `compose.yaml` a los contenedores.
 
-## Variables de ejecución
+## Servicios de IA
 
-| Variable                           | Uso                                                                                               |
-|------------------------------------|---------------------------------------------------------------------------------------------------|
-| `VANTRA_MODE`                      | `DEMO` (sin APIs) o `LIVE` (integraciones externas).                                              |
-| `ANTHROPIC_API_KEY`                | Credencial API de Claude.                                                                         |
-| `ANTHROPIC_MODEL`                  | Identificador de modelo habilitado en su cuenta; el ejemplo inicial puede requerir actualización. |
-| `DEEPGRAM_API_KEY`                 | Clave para transcripción por archivo y por streaming.                                             |
-| `DEEPGRAM_MODEL`                   | Modelo configurado de transcripción.                                                              |
-| `AZURE_SPEECH_KEY`                 | Clave del recurso Azure AI Speech.                                                                |
-| `AZURE_SPEECH_REGION`              | Región **exacta** de dicho recurso, p. ej., `eastus` si corresponde.                              |
-| `AZURE_SPEECH_VOICE`               | Voz TTS: valor inicial `es-DO-RamonaNeural`; confirmar disponibilidad.                            |
-| `ENABLE_LOCAL_TTS`                 | Opción local de espeak para DEMO si está instalado; en Compose está deshabilitada.                |
-| `LLM_INPUT_USD_PER_MILLION`        | Tarifa estimada configurada manualmente; cero no implica gratuidad.                               |
-| `LLM_OUTPUT_USD_PER_MILLION`       | Tarifa estimada de tokens de salida.                                                              |
-| `DEEPGRAM_USD_PER_MINUTE`          | Tarifa estimada por minuto procesado.                                                             |
-| `AZURE_USD_PER_MILLION_CHARACTERS` | Tarifa estimada de TTS.                                                                           |
+| Variable                                                      | Uso                                                        |
+|---------------------------------------------------------------|------------------------------------------------------------|
+| `VANTRA_MODE`                                                 | `DEMO` (sin proveedores externos) o `LIVE`                 |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`                       | Claude en consultas que requieren LLM                      |
+| `DEEPGRAM_API_KEY` / `DEEPGRAM_MODEL`                         | Reconocimiento de voz                                      |
+| `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`                    | Síntesis de voz; región del mismo recurso                  |
+| `AZURE_SPEECH_VOICE`                                          | Voz configurada de Azure, p. ej. `es-DO-RamonaNeural`      |
+| `LLM_INPUT_USD_PER_MILLION`, `LLM_OUTPUT_USD_PER_MILLION`     | Tarifas de referencia por tokens, actualizar con proveedor |
+| `DEEPGRAM_USD_PER_MINUTE`, `AZURE_USD_PER_MILLION_CHARACTERS` | Tarifas de referencia, 0 **no significa gratuito**         |
 
-Las variables telefónicas son `TWILIO_CALLS_ENABLED`, `TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS`, `TWILIO_ACCOUNT_SID`,
-`TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `TWILIO_PUBLIC_BASE_URL` y `TWILIO_TEST_NUMBERS`. Su significado y controles
-se documentan en [telephony.md](telephony.md).
+**Nota:** la disponibilidad de modelos, voces y tarifas puede cambiar y debe comprobarse en las cuentas contratadas.
+Azure genera audio μ-law de 8 kHz para Twilio. El modo DEMO no mide precisión acústica ni calidad de Claude.
 
-## Preparación de cuentas
+## Twilio, permisos y seguridad
 
-- **Anthropic:** confirme API Key, acceso al identificador de modelo y límites/facturación habilitados. Algunas
-  consultas bancarias se resuelven con Python y no implican una llamada al LLM.
-- **Deepgram:** cree clave con acceso al servicio STT y verifique cuota. Audio recibido desde Gradio se envía al
-  servicio con permiso explícito del usuario.
-- **Azure Speech:** cree recurso Speech, copie clave y región desde Azure Portal y configure una voz admitida. La región
-  incorrecta provoca errores aunque la clave sea correcta.
-- **Twilio:** requiere configurar telefonía Voice por separado; no se activa solo por establecer `VANTRA_MODE=LIVE`.
+| Variable                                   | Uso                                                             |
+|--------------------------------------------|-----------------------------------------------------------------|
+| `TWILIO_CALLS_ENABLED`                     | Desactivado (`false`) de forma predeterminada                   |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | API REST y firmas de webhooks de la misma cuenta                |
+| `TWILIO_FROM_NUMBER`                       | Número habilitado para voz saliente                             |
+| `TWILIO_TEST_NUMBERS`                      | Lista E.164 dominicana, consentida, separada por comas          |
+| `TWILIO_PUBLIC_BASE_URL`                   | Base HTTPS pública estable; sin ruta, puerto ni `/twilio/media` |
+| `TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS`      | Excepción solo para pruebas manuales consentidas                |
+| `TWILIO_DAILY_CALL_LIMIT`                  | Máximo de **1 a 10** intentos/día; predeterminado 3             |
 
-## Ejemplo de `.env` sin secretos
+La URL pública del webhook se obtiene añadiendo `/twilio/status` (la aplicación agrega internamente `?call_id=...` por
+solicitud) y la del audio sustituyendo `https` por `wss` y añadiendo `/twilio/media`. Ese parámetro forma parte de la
+validación de firma, y **no debe incorporarse manualmente** a `TWILIO_PUBLIC_BASE_URL`. Conserve los límites y la lista
+DNC incluso si cambia el proveedor de túnel.
 
-```dotenv
-VANTRA_MODE=DEMO
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-5
-DEEPGRAM_API_KEY=
-DEEPGRAM_MODEL=nova-3
-AZURE_SPEECH_KEY=
-AZURE_SPEECH_REGION=
-AZURE_SPEECH_VOICE=es-DO-RamonaNeural
-TWILIO_CALLS_ENABLED=false
-TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS=false
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_FROM_NUMBER=
-TWILIO_PUBLIC_BASE_URL=
-TWILIO_TEST_NUMBERS=
+## Opciones de conectividad (solo una)
+
+| Variable                  | Cuándo se utiliza                                                         |
+|---------------------------|---------------------------------------------------------------------------|
+| `CONNECTIVITY_PROVIDER`   | `ngrok`, `cloudflare` o `direct`; utilizado por `scripts/connectivity.py` |
+| `NGROK_AUTHTOKEN`         | Modo ngrok, contenedor `ngrok/ngrok`                                      |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel administrado                                            |
+| `VANTRA_PUBLIC_HOST`      | Host DNS (sin protocolo) de Caddy en modo directo                         |
+| `CADDY_EMAIL`             | Correo de ACME/TLS automático para Caddy                                  |
+
+Para ngrok se necesita URL de dominio reservado; para Cloudflare, el hostname público del túnel debe dirigirse a **
+`http://twilio-webhook:8000`**; para directo, `VANTRA_PUBLIC_HOST` tiene que coincidir con el hostname de
+`TWILIO_PUBLIC_BASE_URL`. **No cambie solamente `CONNECTIVITY_PROVIDER`: también debe actualizar la URL y detener el
+overlay anterior.**
+
+Valide sin iniciar llamadas:
+
+```bash
+python scripts/connectivity.py check
+python scripts/connectivity.py up
+python scripts/connectivity.py probe
 ```
 
-**No dé por confirmado** que un modelo de ejemplo esté disponible: la cuenta, el nombre y el SDK deben comprobarse
-contra el proveedor. Las tarifas en cero significan «sin tarifa registrada», **no costo nulo**.
+`probe` sí necesita Internet, pero no usa credenciales ni crea llamadas. La guía de [telefonía](telephony.md) explica
+cada proveedor y el proceso de migración.
 
-## Orden recomendado de verificación
-
-1. DEMO: chat por texto y herramientas bancarias.
-2. LIVE por texto: comprobar credencial de Anthropic mediante una pregunta abierta.
-3. LIVE por audio: autorizar una grabación ficticia de prueba para Deepgram.
-4. LIVE con la opción «Generar audio de respuesta»: comprobar Azure Speech.
-5. Solo entonces, verificar Twilio y el túnel público mediante [telephony.md](telephony.md).
-
-Reinicie los contenedores después de editar `.env`: `docker compose up -d --force-recreate`. Para aislar errores,
-consulte [troubleshooting.md](troubleshooting.md).
-
-Referencias de los
-fabricantes: [Anthropic API](https://docs.anthropic.com/), [Deepgram](https://developers.deepgram.com/), [Azure Speech](https://learn.microsoft.com/azure/ai-services/speech-service/), [Twilio Voice](https://www.twilio.com/docs/voice).
-
-### Límite de intentos de telefonía
-
-`TWILIO_DAILY_CALL_LIMIT=3` controla el número máximo de intentos diarios (rango admitido: 1–10) en la zona horaria de
-Santo Domingo. Incluye solicitudes fallidas, sin eliminar los controles de consentimiento, autorización de destinatario
-y DNC.
+**Referencias:** [Anthropic](https://docs.anthropic.com/), [Deepgram](https://developers.deepgram.com/), [Azure Speech](https://learn.microsoft.com/azure/ai-services/speech-service/), [Twilio Voice](https://www.twilio.com/docs/voice/).

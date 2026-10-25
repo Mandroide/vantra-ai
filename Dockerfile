@@ -33,6 +33,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=vantra:vantra app.py ./app.py
 COPY --chown=vantra:vantra src ./src
+COPY --chown=vantra:vantra scripts ./scripts
 COPY --chown=vantra:vantra data ./data
 USER vantra
 EXPOSE 7860
