@@ -82,13 +82,13 @@ def test_endpoints_and_signature_do_not_require_tunnel_type(monkeypatch):
         ready = client.get('/readyz')
         assert ready.status_code == 200
         assert 'token-de-prueba' not in ready.text
-        assert client.post('/twilio/status', data={'CallSid': 'CA'+'a'*32}).status_code == 403
-        payload = {'CallSid': 'CA'+'a'*32, 'CallStatus': 'queued'}
-        url = PUBLIC+'/twilio/status'
-        signed = url + ''.join(k+v for k,v in sorted(payload.items()))
+        assert client.post('/twilio/status', data={'CallSid': 'CA' + 'a' * 32}).status_code == 403
+        payload = {'CallSid': 'CA' + 'a' * 32, 'CallStatus': 'queued'}
+        url = PUBLIC + '/twilio/status'
+        signed = url + ''.join(k + v for k, v in sorted(payload.items()))
         signature = base64.b64encode(hmac.new(b'token-de-prueba', signed.encode(), hashlib.sha1).digest()).decode()
         assert tel.twilio_valid_signature(url, signature, payload)
-        assert client.post('/twilio/status', data=payload, headers={'X-Twilio-Signature':signature}).status_code == 200
+        assert client.post('/twilio/status', data=payload, headers={'X-Twilio-Signature': signature}).status_code == 200
 
 
 def test_no_secret_print_in_cli_source():

@@ -168,3 +168,25 @@ más allá de pruebas consentidas.
 **Entregables académicos:** el informe PDF, Canvas, reflexión extensa y evidencias finales se mantienen **fuera del
 repositorio de software**, en la carpeta de entrega de la asignatura. Las funciones codificadas no se consideran pruebas
 de aceptación de APIs reales.
+
+## Dashboard ejecutivo — KPIs y simulación Monte Carlo (Fase 3)
+
+La pestaña **Dashboard ejecutivo · KPIs y Monte Carlo** permite cambiar supuestos económicos, ejecutar 10,000
+simulaciones y visualizar la distribución del beneficio neto, ROI y sensibilidad. Muestra los **36/36 casos de regresión
+DEMO** por separado de la telemetría numérica del chat y de los escenarios hipotéticos; no inventa indicadores LIVE que
+aún no se han medido.
+
+```bash
+uv sync --group dev
+uv run python -m scripts.run_simulation --runs 10000 --seed 8269
+uv run python app.py
+uv run python -m pytest -q
+```
+
+La ejecución de `scripts.run_simulation.py` mediante `python -m` es importante para resolver correctamente los módulos
+desde la raíz. Los archivos JSON y CSV en `results/impact/` son **escenarios económicos sintéticos**, no datos de un
+banco real. Consulte [docs/executive-deployment.md](docs/executive-deployment.md)
+y [docs/canvas-for-canvanizer.md](docs/canvas-for-canvanizer.md). Los costos y tasa de resolución central de ejemplo
+deben sustituirse con información observada y auditada antes de tomar decisiones. Los 102 casos nuevos y el 17.6%
+proceden de las diapositivas del equipo, y NO se han reproducido en esta versión por falta del conjunto de datos y la
+rúbrica.

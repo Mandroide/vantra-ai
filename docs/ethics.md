@@ -46,3 +46,11 @@ procedimiento consentido de telefonía.
 El cambio de túnel **no altera** el consentimiento, la lista DNC ni las reglas de privacidad. Se deben evitar
 intermediarios que registren audios o datos sensibles sin un acuerdo y controles adecuados. El túnel no sustituye
 autenticación de la interfaz ni autorización de acciones.
+
+## Gobernanza Fase 3: decisión de inversión
+
+El dashboard incorpora simulación Monte Carlo; **NO** significa que la automatización sea segura ni que el ROI esté
+verificado. Implementación autónoma prohibida hasta validar rutas de fraude, exclusión Do-Not-Call, privacidad y
+escalamiento con un conjunto de prueba independiente. El Comité debe exigir revisión humana, mediciones LIVE de
+WER/latencia por registro lingüístico y monitoreo de incidentes. Ver [executive-deployment.md](executive-deployment.md).
+Marco de referencia: NIST AI RMF (IA generativa) y Ley dominicana 172-13, sin alegar certificación.

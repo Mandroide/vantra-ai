@@ -85,3 +85,10 @@ marcación por lotes. El código de los conectores **no demuestra por sí solo**
 métricas deben registrarse por separado.
 
 Véanse [instalación](installation.md), [telefonía](telephony.md) y [evaluación](evaluation.md).
+
+## Extensión analítica Fase 3
+
+`src/impact.py` (Monte Carlo) y `src/dashboard/executive.py` (Gradio) no tienen acceso a credenciales Twilio ni a
+información personal. `src/storage.py` registra solamente latencias y estados de las interacciones del chat; estas
+cifras **no** representan calidad ni costos de llamadas reales. La simulación por defecto es reproducible con 10,000
+sorteos de variables hipotéticas (`seed=8269`). Más información en [executive-deployment.md](executive-deployment.md).

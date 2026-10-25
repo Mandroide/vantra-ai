@@ -1,0 +1,142 @@
+{
+  "stress_illustrative": {
+    "scope": "SIMULACIÓN HIPOTÉTICA, no datos operativos medidos ni ROI garantizado",
+    "currency": "DOP",
+    "runs": 10000,
+    "months": 12,
+    "seed": 8269,
+    "assumptions": {
+      "monthly_calls": 12000,
+      "eligible_share": 0.45,
+      "safe_resolution": 0.176,
+      "human_cost_dop": 95.0,
+      "ai_attempt_cost_dop": 18.0,
+      "labor_realization": 0.5,
+      "fixed_monthly_dop": 35000.0,
+      "setup_dop": 250000.0,
+      "human_minutes": 5.0,
+      "uncertainty": 0.2,
+      "months": 12,
+      "n_runs": 10000,
+      "seed": 8269
+    },
+    "annual_net_dop": {
+      "p5": -1542976.38,
+      "p50": -1290657.37,
+      "p95": -1065492.74
+    },
+    "annual_roi_pct": {
+      "p5": -77.73,
+      "p50": -70.73,
+      "p95": -62.23
+    },
+    "monthly_safe_resolutions": {
+      "p5": 741.87,
+      "p50": 944.56,
+      "p95": 1182.68
+    },
+    "monthly_released_hours": {
+      "p5": 61.82,
+      "p50": 78.71,
+      "p95": 98.56
+    },
+    "monthly_realized_hours": {
+      "p5": 29.68,
+      "p50": 39.29,
+      "p95": 50.98
+    },
+    "annual_cost_dop": {
+      "p5": 1574474.83,
+      "p50": 1830507.78,
+      "p95": 2125640.37
+    },
+    "probability_positive_net": 0.0,
+    "sensitivity_spearman_approx": {
+      "ai_attempt_cost_dop": -0.636,
+      "eligible_share": -0.326,
+      "monthly_calls": -0.325,
+      "labor_realization": 0.299,
+      "safe_resolution": 0.284,
+      "human_cost_dop": 0.267,
+      "fixed_monthly_dop": -0.213,
+      "setup_dop": -0.12
+    },
+    "limitations": [
+      "Parámetros hipotéticos, no estimados de facturas ni muestras representativas",
+      "Distribuciones triangulares independientes alrededor de valores elegidos; no captura shocks conjuntos",
+      "Se computa costo evitado únicamente en la fracción labor_realization y no equivalen horas liberadas a caja",
+      "No cuantifica pérdidas extremas de incidentes ni costes legales; requerirían datos adicionales",
+      "La tasa de éxito técnico del DEMO no puede trasladarse directamente a llamadas LIVE"
+    ]
+  },
+  "target_hypothetical": {
+    "scope": "SIMULACIÓN HIPOTÉTICA, no datos operativos medidos ni ROI garantizado",
+    "currency": "DOP",
+    "runs": 10000,
+    "months": 12,
+    "seed": 8269,
+    "assumptions": {
+      "monthly_calls": 12000,
+      "eligible_share": 0.45,
+      "safe_resolution": 0.7,
+      "human_cost_dop": 95.0,
+      "ai_attempt_cost_dop": 18.0,
+      "labor_realization": 0.5,
+      "fixed_monthly_dop": 35000.0,
+      "setup_dop": 250000.0,
+      "human_minutes": 5.0,
+      "uncertainty": 0.2,
+      "months": 12,
+      "n_runs": 10000,
+      "seed": 8269
+    },
+    "annual_net_dop": {
+      "p5": -207559.05,
+      "p50": 300729.99,
+      "p95": 927744.67
+    },
+    "annual_roi_pct": {
+      "p5": -11.42,
+      "p50": 16.43,
+      "p95": 50.22
+    },
+    "monthly_safe_resolutions": {
+      "p5": 2950.61,
+      "p50": 3756.79,
+      "p95": 4703.85
+    },
+    "monthly_released_hours": {
+      "p5": 245.88,
+      "p50": 313.07,
+      "p95": 391.99
+    },
+    "monthly_realized_hours": {
+      "p5": 118.06,
+      "p50": 156.25,
+      "p95": 202.76
+    },
+    "annual_cost_dop": {
+      "p5": 1574474.83,
+      "p50": 1830507.78,
+      "p95": 2125640.37
+    },
+    "probability_positive_net": 0.8245,
+    "sensitivity_spearman_approx": {
+      "labor_realization": 0.508,
+      "safe_resolution": 0.499,
+      "human_cost_dop": 0.492,
+      "ai_attempt_cost_dop": -0.268,
+      "monthly_calls": 0.242,
+      "eligible_share": 0.229,
+      "fixed_monthly_dop": -0.084,
+      "setup_dop": -0.055
+    },
+    "limitations": [
+      "Parámetros hipotéticos, no estimados de facturas ni muestras representativas",
+      "Distribuciones triangulares independientes alrededor de valores elegidos; no captura shocks conjuntos",
+      "Se computa costo evitado únicamente en la fracción labor_realization y no equivalen horas liberadas a caja",
+      "No cuantifica pérdidas extremas de incidentes ni costes legales; requerirían datos adicionales",
+      "La tasa de éxito técnico del DEMO no puede trasladarse directamente a llamadas LIVE"
+    ]
+  }
+}

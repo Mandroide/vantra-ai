@@ -1,0 +1,1 @@
+scenario_id,modality,language_register,reference_intent,predicted_intent,reference_transcription,stt_transcription,human_rubric_pass,critical_violation,latency_ms,api_cost_dop

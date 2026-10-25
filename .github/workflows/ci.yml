@@ -67,6 +67,17 @@ jobs:
           assert summary['total'] == 36 and summary['passed'] == 36, summary
           print(f"Evaluación offline: {summary['passed']}/{summary['total']}")
           PY
+      - name: Monte Carlo reproducible (10 000 escenarios hipotéticos)
+        run: uv run --locked python -m scripts.run_simulation --runs 10000 --seed 8269
+      - name: Verificar salida del simulador
+        run: |
+          uv run --locked python - <<'PYCHECK'
+          import json
+          from pathlib import Path
+          summary = json.loads(Path('results/impact/monte_carlo_summary.json').read_text())
+          assert summary['target_hypothetical']['runs'] == 10000
+          assert 0 <= summary['target_hypothetical']['probability_positive_net'] <= 1
+          PYCHECK
       - name: Guardar cobertura y evaluación (datos sintéticos)
         if: always()
         uses: actions/upload-artifact@v7
@@ -78,6 +89,8 @@ jobs:
             results/demo_evaluation_36.csv
             results/subgroups_demo.csv
             results/summary_demo.json
+            results/impact/monte_carlo_summary.json
+            results/impact/monte_carlo_samples.csv
           if-no-files-found: warn
           retention-days: 14
 

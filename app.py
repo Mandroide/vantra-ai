@@ -5,7 +5,8 @@ import gradio as gr
 from src.agent import respond, Session
 from src.config import env
 from src.speech import transcribe_deepgram, speak_azure, speak_local
-from src.storage import counts
+from src.storage import counts, record_interaction_metric
+from src.dashboard.executive import build_dashboard_tab
 from src.tools import check_contact_policy
 from src.telephony import start_test_call, stop_test_call, get_call, refresh_call_status, add_do_not_call, \
     CallPolicyError, summarize_twilio_http_error
@@ -34,6 +35,10 @@ def render(text, state, history, synth_voice=False):
             'tokens_entrada_LLM': ans.llm_input_tokens, 'tokens_salida_LLM': ans.llm_output_tokens,
             'tts_ms': tts_ms, 'costo_api_real_usd': None,
             'advertencia': 'Costo API desconocido hasta revisar facturación; no representa desempeño de un banco real'}
+    try:
+        record_interaction_metric(ans.mode, ans.status, meta['latencia_total_ms'])
+    except Exception:
+        pass  # La telemetría no debe interrumpir una conversación.
     return history, state, audio, meta, voice_error
 
 
@@ -80,7 +85,7 @@ def call_real(number, prior_consent, authorized_recipient):
     try:
         result = start_test_call(number, confirmed=True)
         return f"Twilio recibió solicitud: {result['status']}. SID: {result['call_sid']}. Estado pendiente de confirmación.", \
-        result['id']
+            result['id']
     except (CallPolicyError, RuntimeError) as exc:
         return f'Bloqueado: {exc}', ''
     except requests.exceptions.HTTPError as exc:
@@ -182,6 +187,7 @@ with gr.Blocks(title='Vantra AI | MVP académico') as app:
         do_not_call_auth = gr.Checkbox(value=False, label='Confirmo que el titular solicitó no recibir más llamadas')
         do_not_call_btn = gr.Button('Registrar exclusión permanente para este número')
         do_not_call_btn.click(phone_block, inputs=[target, do_not_call_auth], outputs=call_state)
+    build_dashboard_tab()
     with gr.Tab('Datos de prueba'):
         gr.Markdown(
             'Los registros solo contienen IDs y etiquetas sintéticas en SQLite. No guardamos conversaciones ni audio en SQLite.')

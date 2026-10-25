@@ -48,9 +48,9 @@ async def ready():
     parsed = urlparse(base)
     configured = (parsed.scheme == 'https' and bool(parsed.hostname)
                   and all(bool(env(name, '')) for name in (
-                      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
-                      'DEEPGRAM_API_KEY', 'ANTHROPIC_API_KEY', 'AZURE_SPEECH_KEY',
-                      'AZURE_SPEECH_REGION')))
+            'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+            'DEEPGRAM_API_KEY', 'ANTHROPIC_API_KEY', 'AZURE_SPEECH_KEY',
+            'AZURE_SPEECH_REGION')))
     # No devuelve secretos; Caddy no lo publica, pero un túnel puede enrutarlo.
     return {'server_ready': True, 'twilio_configured': configured if enabled else False,
             'twilio_enabled': enabled}
@@ -143,12 +143,12 @@ class CallBridge:
         try:
             raw = await asyncio.wait_for(asyncio.to_thread(azure_mulaw_8k, text), timeout=25)
             log.info('voice_tts call_ref=%s duration_ms=%.1f bytes=%d',
-                     self.call_ref, (time.perf_counter()-started)*1000, len(raw))
+                     self.call_ref, (time.perf_counter() - started) * 1000, len(raw))
             # Twilio acepta cualquier tamaño, enviamos bloques pequeños para facilitar su búfer.
             for i in range(0, len(raw), 1600):
                 await self.websocket.send_json({
                     'event': 'media', 'streamSid': self.stream_sid,
-                    'media': {'payload': base64.b64encode(raw[i:i+1600]).decode('ascii')}})
+                    'media': {'payload': base64.b64encode(raw[i:i + 1600]).decode('ascii')}})
             self.hang_after_mark = goodbye
             await self.websocket.send_json({
                 'event': 'mark', 'streamSid': self.stream_sid,
@@ -201,7 +201,7 @@ class CallBridge:
             result, self.session = await asyncio.wait_for(
                 asyncio.to_thread(respond, text, self.session, 'LIVE'), timeout=35)
             log.info('voice_agent call_ref=%s duration_ms=%.1f outcome=%s',
-                     self.call_ref, (time.perf_counter()-started)*1000,
+                     self.call_ref, (time.perf_counter() - started) * 1000,
                      'error' if result.status == 'PROVIDER_ERROR' else 'ok')
             if result.status == 'PROVIDER_ERROR':
                 await self._send_audio('El asistente no está disponible ahora. Finalizamos la llamada.', goodbye=True)

@@ -75,3 +75,15 @@ original estimaba USD 0.02–0.03/min y USD 5–10 para APIs: no deben reportars
 **Pendientes de verificación:** `uv.lock` versionado, despliegue accesible validado mediante
 `scripts/connectivity.py probe`, medición de llamadas LIVE de WER/latencias/costos, revisión humana, documentos finales
 aprobados y permisos de acceso a las evidencias. Para riesgos específicos, consulte [ethics.md](ethics.md).
+
+## Fase 3: dashboard y simulación económica
+
+El módulo `src/impact.py` construye escenarios **hipotéticos**, no resultados de clientes reales. Ejecución:
+`uv run python -m scripts.run_simulation --runs 10000 --seed 8269`. Salidas en `results/impact/`. La nueva pestaña
+Gradio presenta histogramas, escenarios P5/P50/P95 y correlaciones de sensibilidad; la telemetría observada del texto se
+consulta mediante el botón **Actualizar telemetría registrada**. La metodología, los supuestos y los riesgos de
+interpretación se detallan en [executive-deployment.md](executive-deployment.md).
+
+El módulo `src/kpis.py` incluye WER, F1 macro y por intención, y latencia P50/P95 para **datos etiquetados**. El archivo
+`data/templates/live_evaluation_template.csv` es una plantilla vacía para las evaluaciones consentidas: no se publican
+transcripciones reales. Nunca fabricar valores ausentes.
