@@ -149,7 +149,7 @@ with st.sidebar:
             overrides[key] = (lo * ratio, new_mode, min(hi * ratio, 0.99) if key == "aceptacion" else hi * ratio)
     factor = st.slider("Factor sobre la tasa de acción equivocada en intenciones críticas", 0.05, 1.5,
                        float(esc["error_critico_factor"]), 0.05,
-                       help="1.0 = lo medido en el held-out v2; 0.2 = meta de alrededor de 1% (guardrail).")
+                       help="1.0 = lo medido en el held-out v2; 0.2 significa reducción hipotética del 80%; no acota a 1%.")
     cerrar = st.toggle("Cerrar la brecha coloquial (meta de equidad)", value=esc["cerrar_brecha"])
     n_sim = st.select_slider("Escenarios de Monte Carlo", [2_000, 5_000, 10_000, 20_000], value=10_000)
     seed = st.number_input("Semilla", value=2026, step=1)
@@ -186,6 +186,9 @@ with tabs[0]:
     k[4].metric("P(ROI > 0) en el año 1", pct(p_roi, 0))
     st.caption(f"{int(n_sim):,} escenarios de Monte Carlo. El desempeño del agente sale de la posterior MCMC sobre "
                f"{len(rows_now)} frases del held-out v2 evaluadas en vivo contra el código actual.")
+    st.warning("Los ahorros monetarios son **valores modelados de capacidad** bajo supuestos; "
+               "reasignar horas no equivale automáticamente a ahorrar nómina. La tarifa por minuto "
+               "del bot no ha sido conciliada con una cotización del flujo telefónico real.")
 
     df = pd.DataFrame({"neto": o["neto_mes"]})
     hist = alt.Chart(df).mark_bar(color=C1, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
@@ -294,11 +297,12 @@ with tabs[2]:
     vols = [30_000, 50_000, 80_000, 120_000, 160_000, 200_000, 250_000, 300_000]
     curve = []
     for name, ov, fac in (("Nube, desempeño actual", {}, 1.0), ("Stack local, desempeño actual", montecarlo.LOCAL, 1.0),
-                          ("Stack local, error crítico ≤1%", montecarlo.LOCAL, 0.2)):
+                          ("Stack local, reducción hipotética 80% error crítico", montecarlo.LOCAL, 0.2)):
         for p in montecarlo.curva_volumen(perf, vols, ov, fac, n=2_000):
             curve.append({"Configuración": name, "Llamadas al mes": p["llamadas_mes"], "P(VPN>0)": p["p_vpn_positivo"]})
     dc = pd.DataFrame(curve)
-    dom = ["Nube, desempeño actual", "Stack local, desempeño actual", "Stack local, error crítico ≤1%"]
+    dom = ["Nube, desempeño actual", "Stack local, desempeño actual",
+           "Stack local, reducción hipotética 80% error crítico"]
     base = alt.Chart(dc).encode(
         x=alt.X("Llamadas al mes:Q", axis=alt.Axis(format="~s"), title="Llamadas mensuales del contact center"),
         y=alt.Y("P(VPN>0):Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%"),
@@ -460,3 +464,34 @@ with tabs[8]:
         st.caption(f"Consumos con tarifa: {usage['priced_records']}; sin tarifa: {usage['unpriced_records']}.")
     st.warning("NO es el costo completo de una llamada: faltan telefonía Twilio, impuestos, "
                "almacenamiento y conciliación de la factura real.")
+
+# ----------------------------------------------------------------------------- 8. auditoría económica y telefonía
+with tabs[7]:
+    st.markdown("### Costos de telefonía y validez de las conclusiones")
+    st.info("Comparación de escenarios HIPOTÉTICOS. El 92% del modelo histórico combina "
+            "pila local y una reducción supuesta del 80% de acciones críticas equivocadas; "
+            "no garantiza un máximo de 1%. La muestra posterior escalada aún puede superar 1%.")
+    st.markdown("La tarifa pública Twilio Voice para llamadas salientes a República Dominicana "
+                "es **US$0.1155/min local** o **US$0.1925/min móvil** "
+                "([fuente oficial](https://www.twilio.com/en-us/voice/pricing/do)). "
+                "No se aplica a todas las llamadas de un banco sin conocer la mezcla, modalidad y contrato.")
+    base_stress = montecarlo.run_scenario(perf, "grande_local_guardrail", n=int(n_sim), seed=int(seed))
+    cases = [("Modelo original: stack local, reducción de error 80%", base_stress, "0.005–0.02 (total supuesto)"),
+             ("Estrés: todos los minutos salientes locales", montecarlo.run_tariff_stress(
+                 perf, montecarlo.TWILIO_RD_SALIENTE_LOCAL_USD_MIN, n=int(n_sim), seed=int(seed)), "0.1155 (Twilio)"),
+             ("Estrés: todos los minutos salientes móviles", montecarlo.run_tariff_stress(
+                 perf, montecarlo.TWILIO_RD_SALIENTE_MOVIL_USD_MIN, n=int(n_sim), seed=int(seed)), "0.1925 (Twilio)")]
+    audit_rows = []
+    for name, case, tariff in cases:
+        audit_rows.append({"Supuesto": name, "Costo/min US$": tariff,
+                           "P(VPN>0)": case.prob("vpn_36m", ">", 0),
+                           "Neto P50 US$/mes": case.stats("neto_mes")["p50"]})
+    st.dataframe(pd.DataFrame(audit_rows).style.format({"P(VPN>0)": "{:.1%}",
+                                                        "Neto P50 US$/mes": "{:,.0f}"}),
+                 hide_index=True, width="stretch")
+    st.caption("Las dos pruebas de estrés usan como costo TOTAL de bot únicamente el precio de "
+               "telefonía Twilio. No incluyen STT, TTS, LLM, impuestos ni descuentos, por lo que "
+               "son cotas optimistas dentro de ese supuesto extremo, no pronósticos ni cotizaciones.")
+    st.markdown("**Antes de decidir una inversión:** validar duración por flujo, volumen entrante/saliente, "
+                "tipo de destino, tarifas negociadas, costo STT/TTS/LLM y proporción del tiempo de asesor "
+                "que se convierte en ahorro financiero efectivo. También falta transferencia a humano LIVE.")

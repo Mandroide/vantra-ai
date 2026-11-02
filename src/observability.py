@@ -30,31 +30,10 @@ def record_call_event(call_id: str, stage: str, event: str, duration_ms: float |
         DB.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(DB, timeout=5)) as conn:
             with conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS call_events
-                                (
-                                    id
-                                    INTEGER
-                                    PRIMARY
-                                    KEY,
-                                    call_id
-                                    TEXT
-                                    NOT
-                                    NULL,
-                                    at_utc
-                                    INTEGER
-                                    NOT
-                                    NULL,
-                                    stage
-                                    TEXT
-                                    NOT
-                                    NULL,
-                                    event
-                                    TEXT
-                                    NOT
-                                    NULL,
-                                    duration_ms
-                                    REAL
-                                )""")
+                conn.execute("""CREATE TABLE IF NOT EXISTS call_events (
+                    id INTEGER PRIMARY KEY, call_id TEXT NOT NULL, at_utc INTEGER NOT NULL,
+                    stage TEXT NOT NULL, event TEXT NOT NULL, duration_ms REAL
+                )""")
                 conn.execute('INSERT INTO call_events (call_id,at_utc,stage,event,duration_ms) VALUES (?,?,?,?,?)',
                              (call_id, int(time.time()), stage, event, duration_ms))
         return True
@@ -105,31 +84,10 @@ def record_provider_usage(call_id: str, provider: str, units: float,
         DB.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(DB, timeout=5)) as conn:
             with conn:
-                conn.execute('''CREATE TABLE IF NOT EXISTS call_usage
-                                (
-                                    id
-                                    INTEGER
-                                    PRIMARY
-                                    KEY,
-                                    call_id
-                                    TEXT
-                                    NOT
-                                    NULL,
-                                    at_utc
-                                    INTEGER
-                                    NOT
-                                    NULL,
-                                    provider
-                                    TEXT
-                                    NOT
-                                    NULL,
-                                    units
-                                    REAL
-                                    NOT
-                                    NULL,
-                                    estimated_usd
-                                    REAL
-                                )''')
+                conn.execute('''CREATE TABLE IF NOT EXISTS call_usage (
+                    id INTEGER PRIMARY KEY, call_id TEXT NOT NULL, at_utc INTEGER NOT NULL,
+                    provider TEXT NOT NULL, units REAL NOT NULL, estimated_usd REAL
+                )''')
                 conn.execute('INSERT INTO call_usage(call_id,at_utc,provider,units,estimated_usd) VALUES (?,?,?,?,?)',
                              (call_id, int(time.time()), provider, units, estimated_usd))
         return True

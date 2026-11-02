@@ -281,3 +281,35 @@ inicial del 70 %.
 **Costos:** las unidades LIVE registradas en SQLite permiten estimar un subtotal con tarifas configuradas; la factura
 completa de Twilio/servicios sigue sin verificarse. El ROI continúa siendo una proyección Monte Carlo independiente de
 estos registros.
+
+## Diagnóstico de cuatro fallos frecuentes al actualizar en Windows / PyCharm
+
+Si se extrae una versión ZIP **sobre** un checkout anterior, los archivos antiguos
+permanecen en el árbol y Git puede conservar rutas eliminadas en su índice.
+El parche de compatibilidad corrige tres causas de falsos fallos:
+
+- `test_secret_scan_passes_synthetic_repository`: ignora rutas versionadas que ya no existen
+  y sigue detectando archivos sensibles reales.
+- `test_eight_canonical_markdown_files`: exige la presencia de las ocho guías, pero permite
+  documentos adicionales sin eliminarlos.
+- `test_dominican_local_schedule_blocks`: establece el permiso de pruebas fuera de horario
+  en `false` durante la prueba, sin depender de las opciones de su `.env`.
+
+**Integridad del held-out v2:** la prueba admite una conversión de finales de línea
+LF/CRLF causada por Windows, pero **no** acepta alteraciones de datos ni huellas recalculadas.
+Para conocer su estado real:
+
+```powershell
+uv run python -m scripts.verify_frozen_holdout
+uv run --locked --group dashboard python -m pytest -q
+```
+
+Si indica `modified`, respalde la copia actual y restaure exclusivamente
+`data/holdout_v2_scenarios.json` desde la distribución original confiable. No ejecute
+`scripts/make_holdout_v2.py` ni cambie `data/holdout_v2.sha256` para hacer pasar la prueba.
+
+**Actualización segura:** descomprima el nuevo ZIP en una carpeta *nueva*. Lleve a ella
+solo los cambios propios revisados y su `.env` privado, sin publicar este último.
+Conserve y respalde la base de datos y volúmenes Docker; nunca use `docker compose down -v`
+para una actualización rutinaria. Gradio sigue siendo el agente operativo; **Streamlit
+es el único dashboard**.

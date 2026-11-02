@@ -159,16 +159,16 @@ ESCENARIOS = {
                "cerrar_brecha": False},
     "grande_local": {"nombre": "Banco grande, stack local", "overrides": {**GRANDE, **LOCAL},
                      "error_critico_factor": 1.0, "cerrar_brecha": False},
-    "grande_guardrail": {"nombre": "Banco grande, nube, error crítico ≤1%", "overrides": GRANDE,
+    "grande_guardrail": {"nombre": "Banco grande, nube, reducción hipotética 80% de error crítico", "overrides": GRANDE,
                          "error_critico_factor": 0.2, "cerrar_brecha": False},
-    "grande_local_guardrail": {"nombre": "Banco grande, stack local, error crítico ≤1%",
+    "grande_local_guardrail": {"nombre": "Banco grande, stack local, reducción hipotética 80% de error crítico",
                                "overrides": {**GRANDE, **LOCAL}, "error_critico_factor": 0.2, "cerrar_brecha": False},
 }
 
 
 def apply_perf(perf: dict, error_critico_factor: float = 1.0, cerrar_brecha: bool = False) -> dict:
     """Modifica la posterior para escenarios hipotéticos (no son mediciones):
-    error_critico_factor escala la tasa de acción equivocada en intenciones críticas (0.2 = meta de ~1%);
+    error_critico_factor escala la tasa de acción equivocada en intenciones críticas (0.2 = reducción hipotética del 80%, sin imponer límite del 1%);
     cerrar_brecha iguala el desempeño coloquial al formal (meta de equidad)."""
     p = dict(perf)
     p["p_error_critico"] = np.asarray(perf["p_error_critico"]) * error_critico_factor
@@ -193,3 +193,26 @@ def curva_volumen(perf: dict, volumenes, overrides: dict | None = None, error_cr
         out.append({"llamadas_mes": int(v), "p_vpn_positivo": r.prob("vpn_36m", ">", 0.0),
                     "neto_p50": r.stats("neto_mes")["p50"]})
     return out
+
+
+# ----------------------------------------------------------------------------- sensibilidad pública de telefonía
+TWILIO_RD_SALIENTE_LOCAL_USD_MIN = 0.1155
+TWILIO_RD_SALIENTE_MOVIL_USD_MIN = 0.1925
+
+
+def run_tariff_stress(perf: dict, tarifa_usd_min: float, n: int = 10_000, seed: int = 2026) -> Result:
+    """Estrés de costo para el escenario grande/local/reducción de error 80%.
+
+    Sustituye el costo TOTAL del bot por el precio SOLO de la telefonía saliente.
+    Por ello es una cota optimista si TODOS los minutos fueran salientes de esa clase.
+    No modela mezcla entrantes/salientes, descuento, BYOC, STT, TTS ni LLM.
+    Es un supuesto de sensibilidad, NO un costo medido o VPN contratado.
+    """
+    tarifa = float(tarifa_usd_min)
+    if not np.isfinite(tarifa) or tarifa <= 0:
+        raise ValueError("La tarifa debe ser positiva y finita")
+    return run(
+        apply_perf(perf, error_critico_factor=0.2),
+        n=n, seed=seed,
+        overrides={**GRANDE, **LOCAL, "costo_min_bot": tarifa},
+    )

@@ -35,29 +35,10 @@ def counts():
 # Telemetría numérica local: no registra voz, texto, números ni datos de clientes.
 def _ensure_metrics_table(conn):
     conn.execute(
-        """CREATE TABLE IF NOT EXISTS interaction_metrics
-           (
-               id
-               INTEGER
-               PRIMARY
-               KEY,
-               created_at
-               TEXT
-               DEFAULT
-               CURRENT_TIMESTAMP,
-               mode
-               TEXT
-               NOT
-               NULL,
-               status
-               TEXT
-               NOT
-               NULL,
-               elapsed_ms
-               REAL
-               NOT
-               NULL
-           )"""
+        """CREATE TABLE IF NOT EXISTS interaction_metrics (
+            id INTEGER PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT NOT NULL, status TEXT NOT NULL, elapsed_ms REAL NOT NULL
+        )"""
     )
 
 
