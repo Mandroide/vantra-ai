@@ -32,77 +32,66 @@ def counts():
         return {t: c.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in ('leads', 'callbacks', 'transfers')}
 
 
-def record_interaction_metric(mode: str, status: str, elapsed_ms: float):
-    """Guarda ÚNICAMENTE telemetría agregable; sin texto, voz, números ni tokens."""
-    if mode not in {'LIVE', 'DEMO'}:
-        return
-    if not (0 <= elapsed_ms <= 3_600_000):
-        return
-    with closing(connection()) as c:
-        with c:
-            c.execute('''CREATE TABLE IF NOT EXISTS interaction_metrics
-                         (
-                             id
-                             INTEGER
-                             PRIMARY
-                             KEY,
-                             created_at
-                             TEXT
-                             DEFAULT
-                             CURRENT_TIMESTAMP,
-                             mode
-                             TEXT
-                             NOT
-                             NULL,
-                             status
-                             TEXT
-                             NOT
-                             NULL,
-                             elapsed_ms
-                             REAL
-                             NOT
-                             NULL
-                         )''')
-            c.execute('INSERT INTO interaction_metrics(mode,status,elapsed_ms) VALUES (?,?,?)',
-                      (mode, str(status)[:30], elapsed_ms))
+# Telemetría numérica local: no registra voz, texto, números ni datos de clientes.
+def _ensure_metrics_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS interaction_metrics
+           (
+               id
+               INTEGER
+               PRIMARY
+               KEY,
+               created_at
+               TEXT
+               DEFAULT
+               CURRENT_TIMESTAMP,
+               mode
+               TEXT
+               NOT
+               NULL,
+               status
+               TEXT
+               NOT
+               NULL,
+               elapsed_ms
+               REAL
+               NOT
+               NULL
+           )"""
+    )
 
 
-def telemetry_summary():
-    """Métricas de la aplicación observadas localmente, NO precisión de tareas."""
-    with closing(connection()) as c:
-        c.execute('''CREATE TABLE IF NOT EXISTS interaction_metrics
-                     (
-                         id
-                         INTEGER
-                         PRIMARY
-                         KEY,
-                         created_at
-                         TEXT
-                         DEFAULT
-                         CURRENT_TIMESTAMP,
-                         mode
-                         TEXT
-                         NOT
-                         NULL,
-                         status
-                         TEXT
-                         NOT
-                         NULL,
-                         elapsed_ms
-                         REAL
-                         NOT
-                         NULL
-                     )''')
-        result = {}
-        for mode in ('DEMO', 'LIVE'):
-            rows = c.execute('SELECT elapsed_ms FROM interaction_metrics WHERE mode=? ORDER BY elapsed_ms',
-                             (mode,)).fetchall()
-            vals = [float(r[0]) for r in rows]
-            if vals:
-                import numpy as np
-                result[mode] = {'interacciones_texto_observadas': len(vals),
-                                'latencia_aplicacion_p50_ms': round(float(np.median(vals)), 2),
-                                'latencia_aplicacion_p95_ms': round(float(np.percentile(vals, 95)), 2)}
-            else:
-                result[mode] = {'interacciones_texto_observadas': 0, 'latencias': 'No registradas'}
-        return result
+def record_interaction_metric(mode: str, status: str, elapsed_ms: float) -> None:
+    """Registra únicamente duración y resultado; medición de la aplicación Gradio."""
+    import math
+
+    if mode not in {"DEMO", "LIVE"} or not math.isfinite(elapsed_ms) or not 0 <= elapsed_ms <= 3_600_000:
+        return
+    # Evita que el estado contenga por error contenido de usuario.
+    if status not in {"OK", "UNKNOWN", "DENIED", "CONSENT_DENIED", "DNC_REQUESTED",
+                      "NEED_CONFIRMATION", "PROVIDER_ERROR", "FALLBACK_HUMAN",
+                      "TRANSFER", "ERROR", "PARTIAL"}:
+        status = "OTRO"
+    with closing(connection()) as conn:
+        with conn:
+            _ensure_metrics_table(conn)
+            conn.execute("INSERT INTO interaction_metrics (mode, status, elapsed_ms) VALUES (?, ?, ?)",
+                         (mode, status, float(elapsed_ms)))
+
+
+def telemetry_summary() -> dict:
+    """Conteos y latencia P50/P95 por modo. No representa WER ni éxito de tarea."""
+    import numpy as np
+
+    result = {}
+    with closing(connection()) as conn:
+        _ensure_metrics_table(conn)
+        for mode in ("DEMO", "LIVE"):
+            values = [row[0] for row in conn.execute(
+                "SELECT elapsed_ms FROM interaction_metrics WHERE mode = ?", (mode,))]
+            result[mode] = {"interacciones_gradio_observadas": len(values),
+                            "latencia_aplicacion_p50_ms": round(float(np.percentile(values, 50)),
+                                                                2) if values else None,
+                            "latencia_aplicacion_p95_ms": round(float(np.percentile(values, 95)),
+                                                                2) if values else None}
+    return result

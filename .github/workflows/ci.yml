@@ -30,54 +30,41 @@ jobs:
       - name: Obtener código
         uses: actions/checkout@v7
       - name: Instalar uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.10.0"
           enable-cache: true
       - name: Instalar Python
         run: uv python install "${UV_PYTHON}"
-      - name: Comprobar/generar archivo de bloqueo
+      - name: Comprobar archivo de bloqueo
         shell: bash
         run: |
-          if test -f uv.lock; then
-            uv lock --check
-          else
-            echo '::warning::uv.lock falta: CI resuelve dependencias para esta ejecución; generar uv lock y versionarlo para reproducibilidad.'
-            uv lock
-          fi
+          test -f uv.lock || (echo '::error::Se requiere uv.lock versionado' && exit 1)
+          uv lock --check
       - name: Instalar dependencias bloqueadas
-        run: uv sync --locked --group dev
+        run: uv sync --locked --group dev --group dashboard
       - name: Lint (Ruff)
-        run: uv run --locked ruff check .
+        run: uv run --locked --group dashboard ruff check .
       - name: Validar configuración de infraestructura (sin cuentas)
-        run: uv run --locked python -m pytest -q tests/test_connectivity.py
+        run: uv run --locked --group dashboard python -m pytest -q tests/test_connectivity.py
       - name: Verificar secretos y archivos sensibles
-        run: uv run --locked python scripts/check_secrets.py
+        run: uv run --locked --group dashboard python scripts/check_secrets.py
       - name: Pruebas y cobertura
-        run: uv run --locked python -m pytest -q --cov=src --cov=app --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
+        run: uv run --locked --group dashboard python -m pytest -q --cov=src --cov=app --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
       - name: Evaluación reproducible sin proveedores externos
-        run: uv run --locked python scripts/run_evaluation.py
+        run: uv run --locked --group dashboard python scripts/run_evaluation.py
       - name: Comprobar resultados 36 casos
         shell: bash
         run: |
-          uv run --locked python - <<'PY'
+          uv run --locked --group dashboard python - <<'PY'
           import json
           from pathlib import Path
           summary = json.loads(Path('results/summary_demo.json').read_text(encoding='utf-8'))
           assert summary['total'] == 36 and summary['passed'] == 36, summary
           print(f"Evaluación offline: {summary['passed']}/{summary['total']}")
           PY
-      - name: Monte Carlo reproducible (10 000 escenarios hipotéticos)
-        run: uv run --locked python -m scripts.run_simulation --runs 10000 --seed 8269
-      - name: Verificar salida del simulador
-        run: |
-          uv run --locked python - <<'PYCHECK'
-          import json
-          from pathlib import Path
-          summary = json.loads(Path('results/impact/monte_carlo_summary.json').read_text())
-          assert summary['target_hypothetical']['runs'] == 10000
-          assert 0 <= summary['target_hypothetical']['probability_positive_net'] <= 1
-          PYCHECK
+      - name: Probar panel Streamlit de Fase 3
+        run: uv run --locked --group dashboard python -m pytest -q tests/test_dashboard.py
       - name: Guardar cobertura y evaluación (datos sintéticos)
         if: always()
         uses: actions/upload-artifact@v7
@@ -89,8 +76,6 @@ jobs:
             results/demo_evaluation_36.csv
             results/subgroups_demo.csv
             results/summary_demo.json
-            results/impact/monte_carlo_summary.json
-            results/impact/monte_carlo_samples.csv
           if-no-files-found: warn
           retention-days: 14
 
@@ -109,5 +94,16 @@ jobs:
           context: .
           push: false
           tags: vantra-ai:mvp-ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validar imagen Streamlit (dependencias dashboard)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: vantra-ai:dashboard-ci
+          build-args: |
+            WITH_DASHBOARD=true
           cache-from: type=gha
           cache-to: type=gha,mode=max

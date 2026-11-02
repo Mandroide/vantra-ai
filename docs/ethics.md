@@ -33,6 +33,21 @@ adicionales.
 - Mantener las decisiones financieras sensibles y las reclamaciones bajo supervisión humana autorizada antes de
   cualquier piloto institucional.
 
+## Gobernanza de la Fase 3
+
+- **Paridad por registro como criterio de salida:** la brecha formal–coloquial medida en v2 (82.5% frente a 57.9%) es
+  un riesgo de trato desigual; el piloto no avanza mientras la brecha supere 5 puntos con al menos 100 frases reales
+  por registro.
+- **Intenciones críticas:** fraude, privacidad, exclusión de llamadas y pedidos de aprobación se evalúan antes que
+  cualquier otra regla. Meta de avance: tasa de acción equivocada ≤ 1%, demostrada con 300 casos críticos sin error
+  (regla del tres, 95% de confianza).
+- **Derivación por defecto:** en un piloto se configura `VANTRA_FALLBACK=humano`; ninguna consulta no entendida queda
+  sin atención.
+- **Marco aplicable en RD:** Ley 172-13 de protección de datos (con reforma en discusión), régimen de secreto bancario
+  de la Ley 183-02, Reglamento de Seguridad Cibernética y de la Información (Junta Monetaria, 2018) y Reglamento de
+  Protección al Usuario de los Productos y Servicios Financieros (en vigor desde octubre de 2026). Requiere validación
+  de asesoría legal.
+
 ## Estado de validación
 
 Las pruebas automáticas comprueban algunas restricciones de lógica; **no prueban cumplimiento jurídico, ausencia de
@@ -47,10 +62,13 @@ El cambio de túnel **no altera** el consentimiento, la lista DNC ni las reglas 
 intermediarios que registren audios o datos sensibles sin un acuerdo y controles adecuados. El túnel no sustituye
 autenticación de la interfaz ni autorización de acciones.
 
-## Gobernanza Fase 3: decisión de inversión
+## Gobernanza de la telemetría y separación de evidencia
 
-El dashboard incorpora simulación Monte Carlo; **NO** significa que la automatización sea segura ni que el ROI esté
-verificado. Implementación autónoma prohibida hasta validar rutas de fraude, exclusión Do-Not-Call, privacidad y
-escalamiento con un conjunto de prueba independiente. El Comité debe exigir revisión humana, mediciones LIVE de
-WER/latencia por registro lingüístico y monitoreo de incidentes. Ver [executive-deployment.md](executive-deployment.md).
-Marco de referencia: NIST AI RMF (IA generativa) y Ley dominicana 172-13, sin alegar certificación.
+La nueva telemetría conserva solo modo (DEMO/LIVE), categoría de estado, milisegundos de ejecución y momento. No
+registra texto, voz, números de teléfono ni identificadores de clientes. Su retención y borrado siguen siendo
+responsabilidad del operador del piloto. Gradio y Streamlit se publican únicamente en loopback local; exponerlos
+públicamente requeriría autenticación, control de acceso y pruebas adicionales.
+
+No se deben combinar los porcentajes de exactitud textual del held-out v2 con los conteos de interacciones Gradio para
+declarar un éxito operativo medido. Los modelos económicos alternativos del borrador se excluyeron para no presentar ROI
+incompatibles bajo una misma marca.

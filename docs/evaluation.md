@@ -27,6 +27,22 @@ con satisfacción humana o ausencia de sesgo.
 E08 comprueba la política de contactos mediante herramienta. E06 incluye la confirmación en un turno adicional. Las
 variantes escritas por el equipo no representan una muestra demográfica ni acústica de la República Dominicana.
 
+## Fase 3: held-out congelado, MCMC y Monte Carlo
+
+- **Desarrollo y prueba separados.** Las mitigaciones de `src/nlu.py` se diseñaron con el held-out v1
+  (`data/holdout_scenarios.json`). El held-out v2 (`data/holdout_v2_scenarios.json`, 114 frases, huella SHA-256 en
+  `data/holdout_v2.sha256`) se escribió y congeló antes de modificar el agente y solo se usa para medir.
+- **Resultados en v2 (DEMO):** exactitud de 14.9% (17/114) a 72.8% (83/114); F1 macro por intención de 0.23 a 0.79;
+  casos críticos con acción equivocada de 3 a 1 de 36 (los demás críticos fallidos quedan sin resolver y, con
+  `VANTRA_FALLBACK=humano`, pasan a un asesor). Por registro: formal 82.5%, errores de STT 77.8%, coloquial 57.9%.
+- **Sesgo de autoría:** v2 lo escribió el mismo equipo que conocía el tipo de corrección; su resultado puede ser
+  optimista. El ruido de STT de v1 y v2 sale del mismo generador; falta medir WER con audio real.
+- **MCMC:** modelo jerárquico logit por registro con Metropolis dentro de Gibbs y Beta-Binomial para la tasa de acción
+  equivocada en intenciones críticas (validada contra la solución conjugada). Probabilidad posterior de que el registro
+  coloquial esté peor atendido que el formal: 95%.
+- **Monte Carlo:** 10,000 escenarios con supuestos citados en `analytics/assumptions.py`. Los resultados por escenario
+  de decisión están en `results/fase3/resumen.json` y en el cuadro de mando.
+
 ## Trazabilidad técnica de telefonía
 
 Los logs del servicio `twilio-webhook` emiten eventos `twilio_status`, `voice_stream_started`, `voice_agent`,
@@ -76,14 +92,12 @@ original estimaba USD 0.02–0.03/min y USD 5–10 para APIs: no deben reportars
 `scripts/connectivity.py probe`, medición de llamadas LIVE de WER/latencias/costos, revisión humana, documentos finales
 aprobados y permisos de acceso a las evidencias. Para riesgos específicos, consulte [ethics.md](ethics.md).
 
-## Fase 3: dashboard y simulación económica
+## Utilidades adicionales de medición
 
-El módulo `src/impact.py` construye escenarios **hipotéticos**, no resultados de clientes reales. Ejecución:
-`uv run python -m scripts.run_simulation --runs 10000 --seed 8269`. Salidas en `results/impact/`. La nueva pestaña
-Gradio presenta histogramas, escenarios P5/P50/P95 y correlaciones de sensibilidad; la telemetría observada del texto se
-consulta mediante el botón **Actualizar telemetría registrada**. La metodología, los supuestos y los riesgos de
-interpretación se detallan en [executive-deployment.md](executive-deployment.md).
+`src/kpis.py` ofrece cálculos de WER, F1 de etiquetas y percentiles P50/P95 para **datasets etiquetados**. No asigna
+automáticamente WER a las llamadas reales: esto requiere audio transcrito por personas autorizadas y de referencia.
 
-El módulo `src/kpis.py` incluye WER, F1 macro y por intención, y latencia P50/P95 para **datos etiquetados**. El archivo
-`data/templates/live_evaluation_template.csv` es una plantilla vacía para las evaluaciones consentidas: no se publican
-transcripciones reales. Nunca fabricar valores ausentes.
+`src/storage.py` registra conteos y latencia de las interacciones con Gradio. Su unidad de análisis es la solicitud a la
+interfaz, no una llamada telefónica completada. Estos conteos se muestran en Gradio y en la pestaña final del dashboard
+de Streamlit. El modelo probabilístico de negocio sigue siendo `analytics/montecarlo.py`, con `analytics/mcmc.py` para
+incertidumbre de desempeño. Los resultados del held-out v2 congelado no se reescriben para reflejar otra metodología.

@@ -1,4 +1,4 @@
-"""Coherencia de las guías consolidadas, offline y sin credenciales."""
+"""Coherencia de las ocho guías consolidadas, offline y sin credenciales."""
 
 import re
 from pathlib import Path
@@ -15,12 +15,10 @@ GUIDES = (
     DOCS / "evaluation.md",
     DOCS / "ethics.md",
     DOCS / "troubleshooting.md",
-    DOCS / "executive-deployment.md",
-    DOCS / "canvas-for-canvanizer.md",
 )
 
 
-def test_canonical_markdown_files():
+def test_eight_canonical_markdown_files():
     assert set(ROOT.glob("*.md")) | set(DOCS.glob("*.md")) == set(GUIDES)
 
 

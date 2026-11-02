@@ -101,3 +101,15 @@ error; resultado de salud local y pública; descripción anonimizada. Mantenga l
 capturas y chats.
 
 Véanse [instalación](installation.md), [configuración](configuration.md) y [telefonía](telephony.md).
+
+## Dashboard de Fase 3 no carga en Docker
+
+Ejecute `docker compose -f compose.yaml -f compose.dashboard.yaml ps` y consulte
+`docker compose -f compose.yaml -f compose.dashboard.yaml logs dashboard`. El build debe instalar el grupo opcional
+`dashboard`; si aparece `No module named streamlit`, compruebe que se construyó con `WITH_DASHBOARD=true` y que se
+utilizó el overlay correcto.
+
+Si no aparecen datos de telemetría, primero realice una interacción desde Gradio. El dashboard solo calcula tiempos de
+interacciones observadas, no de llamadas Twilio. Compruebe que ambos contenedores utilicen
+`VANTRA_DB_PATH=/state/vantra.sqlite3` y compartan `vantra_state`. La ausencia de mediciones LIVE no es un error si
+todavía no se han ejecutado pruebas LIVE.

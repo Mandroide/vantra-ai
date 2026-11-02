@@ -1,0 +1,29 @@
+# Overlay opcional: docker compose -f compose.yaml -f compose.dashboard.yaml up -d --build
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        WITH_DASHBOARD: "true"
+    image: vantra-ai:dashboard
+    command: [ "python", "-m", "streamlit", "run", "dashboard.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false" ]
+    init: true
+    ports:
+      - "127.0.0.1:${VANTRA_DASHBOARD_PORT:-8501}:8501"
+    environment:
+      VANTRA_MODE: DEMO
+      VANTRA_DB_PATH: /state/vantra.sqlite3
+    volumes:
+      - vantra_state:/state
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health',timeout=4).close()" ]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 90s

@@ -2,7 +2,7 @@
 
 **Agente conversacional de voz para un banco ficticio · MVP académico**  
 Universidad Autónoma de Santo Domingo (UASD) · Maestría en Ciencia de Datos e Inteligencia Artificial · Capstone
-Projects, Fase 2.
+Projects, Fase 3 (integración consolidada).
 
 Vantra AI permite consultar productos bancarios ficticios, calcular cuotas con funciones deterministas, registrar
 prospectos de prueba y simular derivaciones. Ofrece una interfaz web con Gradio y adaptadores para reconocimiento de
@@ -16,14 +16,58 @@ previamente autorizados** con Twilio.
 
 ## Funciones
 
-| Componente          | Comportamiento                                                                                                                       |
-|---------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| DEMO                | Chat por texto y operaciones con datos sintéticos sin APIs externas.                                                                 |
-| LIVE                | Conectores de Deepgram (STT), Anthropic Claude (LLM, cuando la consulta lo requiere) y Azure Speech (TTS). Requiere cuentas válidas. |
-| Telefonía           | Llamada saliente **manual** mediante Twilio REST y procesamiento de audio en WebSocket. Deshabilitada de forma predeterminada.       |
-| Seguridad de piloto | Lista de destinatarios permitidos, consentimiento declarado, lista DNC, horario configurable y límites de volumen.                   |
-| Evaluación          | Pytest y 12 escenarios × 3 variantes de texto = 36 verificaciones offline.                                                           |
-| Ingeniería          | uv, Docker Compose, Ruff, pre-commit y GitHub Actions.                                                                               |
+| Componente           | Comportamiento                                                                                                                       |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| DEMO                 | Chat por texto y operaciones con datos sintéticos sin APIs externas.                                                                 |
+| LIVE                 | Conectores de Deepgram (STT), Anthropic Claude (LLM, cuando la consulta lo requiere) y Azure Speech (TTS). Requiere cuentas válidas. |
+| Telefonía            | Llamada saliente **manual** mediante Twilio REST y procesamiento de audio en WebSocket. Deshabilitada de forma predeterminada.       |
+| Seguridad de piloto  | Lista de destinatarios permitidos, consentimiento declarado, lista DNC, horario configurable y límites de volumen.                   |
+| Evaluación           | Pytest y 12 escenarios × 3 variantes de texto = 36 verificaciones offline.                                                           |
+| Ingeniería           | uv, Docker Compose, Ruff, pre-commit y GitHub Actions.                                                                               |
+| Comprensión (Fase 3) | `src/nlu.py`: tolerancia a errores de transcripción, montos en palabras y prioridad de fraude, privacidad y exclusión.               |
+| Analítica (Fase 3)   | `analytics/`: F1 por intención, MCMC bayesiano jerárquico, Monte Carlo del ROI y sensibilidad.                                       |
+| Cuadro de mando      | `dashboard.py` (Streamlit): KPIs técnicos y de negocio, simulación en vivo y prueba del agente.                                      |
+
+## Arquitectura consolidada y fuentes de evidencia
+
+Esta versión toma como **base el repositorio de la Fase 3 presentado por el equipo**. Conserva `src/nlu.py`, el held-out
+v2 congelado, la inferencia MCMC, el análisis Monte Carlo y el dashboard Streamlit.
+Del borrador anterior se incorporan únicamente utilidades **compatibles y complementarias**: telemetría local sin
+texto/audio, funciones de WER/F1/latencias y una pestaña operativa en Gradio. **No se incorpora el modelo alternativo de
+ROI de 12 meses**, ya que los supuestos, monedas y horizontes difieren; la fuente de referencia económica es
+`analytics/montecarlo.py`, con supuestos en `analytics/assumptions.py`.
+
+Resultados del held-out v2: 17/114 (14.9 %) antes, 83/114 (72.8 %) después, en modo DEMO. Son **evaluaciones textuales
+sintéticas**, no precisión medida en llamadas LIVE. Se mantienen los archivos de evidencia de la presentación sin
+alterar su huella.
+
+## Dos interfaces, un solo modelo de negocio
+
+- **Gradio (puerto local 7860):** conversación, voz, telefonía autorizada y métricas de uso local de Gradio (sin
+  contenido de usuario).
+- **Streamlit (puerto local 8501):** evaluación con held-out v2, MCMC, Monte Carlo, sensibilidad, supuestos, diagnóstico
+  y telemetría de Gradio. Los escenarios económicos del informe proceden de esta implementación.
+
+Para ejecutar ambas interfaces con Docker (sin túnel):
+
+```powershell
+docker compose -f compose.yaml -f compose.dashboard.yaml up -d --build
+```
+
+Abra <http://127.0.0.1:7860> y <http://127.0.0.1:8501>. En una sesión con ngrok también puede combinar los archivos
+`-f compose.ngrok.yaml -f compose.dashboard.yaml`; solo el webhook de Twilio se expone mediante el túnel. **No publique
+los dashboards sin autenticación.**
+
+Para ejecución local sin Docker:
+
+```powershell
+uv sync --locked --group dev --group dashboard
+uv run --locked --group dashboard streamlit run dashboard.py
+```
+
+Si usas un `.env` de la Fase 3, puedes elegir `VANTRA_FALLBACK=humano` para derivar consultas no comprendidas; el valor
+`texto` se mantiene para reproducir la evaluación congelada. El overlay Docker propaga el modo configurado en
+`compose.yaml`.
 
 ## Inicio rápido con Docker
 
@@ -58,8 +102,7 @@ sin borrar el volumen SQLite: `docker compose down` (evitar `down -v` si necesit
 Compatible con Python **3.11 y 3.12**, según `pyproject.toml`:
 
 ```bash
-uv lock                     # si aún falta uv.lock
-uv sync --group dev
+uv sync --locked --group dev
 uv run python -m pytest -q
 uv run python scripts/run_evaluation.py
 uv run python app.py
@@ -71,9 +114,7 @@ Para levantar además el receptor Twilio, en otra terminal:
 uv run uvicorn src.telephony_server:app --host 127.0.0.1 --port 8000
 ```
 
-**Reproducibilidad:** `uv.lock` aún no está incluido. Generarlo con acceso a PyPI, versionarlo y luego ejecutar
-`uv sync --locked --group dev`. La imagen admite un primer build sin lock, pero no puede garantizar exactamente las
-mismas versiones hasta que se versione.
+**Reproducibilidad:** `uv.lock` está versionado; `uv sync --locked` instala exactamente las mismas versiones.
 
 ## Configuración de APIs y llamadas
 
@@ -122,6 +163,27 @@ uv run pre-commit run --all-files
 uv run python scripts/run_evaluation.py
 ```
 
+## Fase 3: cuadro de mando, MCMC y Monte Carlo
+
+```bash
+uv sync --locked --group dev --group dashboard
+uv run python scripts/run_holdout_evaluation.py --set v2 --tag despues   # held-out v2 congelado, agente actual
+uv run python scripts/run_simulation.py                                  # MCMC + Monte Carlo -> results/fase3/
+uv run streamlit run dashboard.py                                        # http://localhost:8501
+```
+
+- `data/holdout_v2_scenarios.json` (114 frases) se escribió y congeló **antes** de corregir el agente; su huella está en
+  `data/holdout_v2.sha256` y la verifica `tests/test_holdout.py`. El held-out v1 (Fase 2) se usó para diseñar las
+  mitigaciones; v2 solo para medir. Línea base congelada: `results/holdout_v2_antes_demo_*`.
+- Resultado en v2 (DEMO): exactitud de 14.9% a 72.8%, F1 macro de 0.23 a 0.79 y casos críticos con acción
+  equivocada de 3 a 1 de 36. El registro coloquial sigue por debajo del formal (brecha documentada en
+  [Evaluación](docs/evaluation.md)).
+- `scripts/run_simulation.py` estima la posterior con MCMC (Metropolis, 4 cadenas, R-hat ≤ 1.01) y la propaga a
+  10,000 escenarios de Monte Carlo con supuestos citados en `analytics/assumptions.py`. Es determinista (semillas
+  fijas).
+- El dashboard vuelve a ejecutar el held-out v2 contra el código actual, recalcula la posterior y simula en vivo al
+  mover los supuestos.
+
 Los archivos de `results/` contienen **resultados de DEMO sintético**, no mediciones de precisión acústica, naturalidad,
 latencia o facturación LIVE. Las pruebas LIVE requieren voluntarios, consentimiento, evaluación humana y registro de
 consumo del proveedor.
@@ -131,6 +193,9 @@ consumo del proveedor.
 ```text
 app.py                   Interfaz Gradio (texto, voz y telefonía restringida)
 src/agent.py             Agente y reglas de negocio
+src/nlu.py               Normalización tolerante, números en palabras e intenciones (Fase 3)
+analytics/               Métricas por intención, MCMC, Monte Carlo y supuestos con fuentes (Fase 3)
+dashboard.py             Cuadro de mando Streamlit (Fase 3)
 src/speech.py            STT Deepgram por archivo y TTS Azure
 src/telephony.py         Políticas, llamadas y reconciliación de estados REST Twilio
 src/telephony_server.py  Webhooks, WebSocket y audio telefónico
@@ -142,7 +207,7 @@ infra/Caddyfile           Proxy público con TLS automático (direct)
 scripts/connectivity.py  Comprobar, arrancar, detener y probar acceso público
 data/                    Catálogo y casos ficticios
 tests/, scripts/          Pruebas y evaluación automatizada
-results/                 Evidencias deterministas de DEMO
+results/                 Evidencias deterministas de DEMO; results/fase3/ para MCMC y Monte Carlo
 docs/                    Documentación técnica y académica del MVP
 ```
 
@@ -168,25 +233,3 @@ más allá de pruebas consentidas.
 **Entregables académicos:** el informe PDF, Canvas, reflexión extensa y evidencias finales se mantienen **fuera del
 repositorio de software**, en la carpeta de entrega de la asignatura. Las funciones codificadas no se consideran pruebas
 de aceptación de APIs reales.
-
-## Dashboard ejecutivo — KPIs y simulación Monte Carlo (Fase 3)
-
-La pestaña **Dashboard ejecutivo · KPIs y Monte Carlo** permite cambiar supuestos económicos, ejecutar 10,000
-simulaciones y visualizar la distribución del beneficio neto, ROI y sensibilidad. Muestra los **36/36 casos de regresión
-DEMO** por separado de la telemetría numérica del chat y de los escenarios hipotéticos; no inventa indicadores LIVE que
-aún no se han medido.
-
-```bash
-uv sync --group dev
-uv run python -m scripts.run_simulation --runs 10000 --seed 8269
-uv run python app.py
-uv run python -m pytest -q
-```
-
-La ejecución de `scripts.run_simulation.py` mediante `python -m` es importante para resolver correctamente los módulos
-desde la raíz. Los archivos JSON y CSV en `results/impact/` son **escenarios económicos sintéticos**, no datos de un
-banco real. Consulte [docs/executive-deployment.md](docs/executive-deployment.md)
-y [docs/canvas-for-canvanizer.md](docs/canvas-for-canvanizer.md). Los costos y tasa de resolución central de ejemplo
-deben sustituirse con información observada y auditada antes de tomar decisiones. Los 102 casos nuevos y el 17.6%
-proceden de las diapositivas del equipo, y NO se han reproducido en esta versión por falta del conjunto de datos y la
-rúbrica.

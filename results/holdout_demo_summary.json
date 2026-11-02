@@ -1,0 +1,27 @@
+{
+  "generated_utc": "2026-11-02T00:54:06.632946+00:00",
+  "mode": "DEMO",
+  "set": "v1",
+  "tag": "",
+  "model": null,
+  "price_usd_per_mtok": null,
+  "duration_s": 0.1,
+  "global": {
+    "n": 102,
+    "exactitud_pct": 100.0,
+    "ic95_bajo": 96.4,
+    "ic95_alto": 100.0,
+    "acierto_herramienta_pct": 86.4,
+    "fallos_criticos": 0,
+    "n_criticos": 36,
+    "resuelto_por_reglas_pct": 100.0,
+    "derivado_llm_pct": 0.0,
+    "sin_resolver_pct": 0.0,
+    "latencia_media_ms": 0.54,
+    "latencia_p95_ms": 1.59,
+    "tokens_media": 0,
+    "costo_medio_usd": null
+  },
+  "failed_ids": [],
+  "scope": "Frases nuevas escritas después de las reglas; rúbrica automática. No mide audio ni satisfacción."
+}
