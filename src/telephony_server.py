@@ -19,7 +19,9 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse
 import websockets
 
-from src.agent import Session, respond, normalize
+from src.agent import Session, respond
+from src.critical_policy import critical_intent, consent_accepted
+from src.observability import record_call_event, record_provider_usage, configured_tariff
 from src.config import env, key
 from src.telephony import (CALL_SID, get_call, get_call_by_sid, public_url, claim_stream, mark_do_not_call,
                            stop_test_call, twilio_valid_signature, update_call)
@@ -29,9 +31,6 @@ app = FastAPI(title='Vantra AI · Twilio Webhook (piloto)', docs_url=None, redoc
               openapi_url=None)
 GOODBYE = ('adios', 'hasta luego', 'cuelga', 'termina la llamada', 'terminar llamada',
            'no gracias', 'no, gracias')
-OPT_OUT = ('no me llame', 'no me llamen', 'no me llames', 'no vuelva a llamar',
-           'no me vuelvas a llamar', 'no quiero llamadas',
-           'no me contacte', 'deje de llamar', 'quiten mi numero', 'borrar mi numero')
 
 
 @app.get('/healthz')
@@ -83,6 +82,7 @@ async def status_callback(request: Request):
         if state in {'queued', 'initiated', 'ringing', 'in-progress', 'completed',
                      'busy', 'failed', 'no-answer', 'canceled'}:
             update_call(info['id'], state, sid)
+            record_call_event(info['id'], 'twilio', state)
             log.info('twilio_status event=%s call_ref=%s', state,
                      hashlib.sha256(sid.encode()).hexdigest()[:12])
     else:
@@ -135,6 +135,9 @@ class CallBridge:
         self.worker: asyncio.Task | None = None
         self.dg = None
         self.utterances = 0
+        self.consent_accepted = False
+        self.last_media_at = None
+        self.deepgram_audio_bytes = 0
         self.call_ref = hashlib.sha256(call_sid.encode()).hexdigest()[:12]
 
     async def _send_audio(self, text: str, *, goodbye=False):
@@ -142,8 +145,13 @@ class CallBridge:
         started = time.perf_counter()
         try:
             raw = await asyncio.wait_for(asyncio.to_thread(azure_mulaw_8k, text), timeout=25)
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            record_call_event(self.call_id, 'tts', 'ok', elapsed_ms)
+            tariff = configured_tariff('AZURE_USD_PER_MILLION_CHARACTERS')
+            record_provider_usage(self.call_id, 'azure_tts_characters', len(text[:650]),
+                                  len(text[:650]) * tariff / 1e6 if tariff is not None else None)
             log.info('voice_tts call_ref=%s duration_ms=%.1f bytes=%d',
-                     self.call_ref, (time.perf_counter() - started) * 1000, len(raw))
+                     self.call_ref, elapsed_ms, len(raw))
             # Twilio acepta cualquier tamaño, enviamos bloques pequeños para facilitar su búfer.
             for i in range(0, len(raw), 1600):
                 await self.websocket.send_json({
@@ -154,6 +162,7 @@ class CallBridge:
                 'event': 'mark', 'streamSid': self.stream_sid,
                 'mark': {'name': 'voice_end'}})
         except Exception:
+            record_call_event(self.call_id, 'tts', 'error')
             self.speaking = False
             raise
 
@@ -161,6 +170,7 @@ class CallBridge:
         if self.stop_requested:
             return
         self.stop_requested = True
+        record_call_event(self.call_id, 'call', 'closing')
         try:
             await asyncio.to_thread(stop_test_call, self.call_id)
         except Exception:
@@ -185,12 +195,33 @@ class CallBridge:
             return
         self.processing = True
         try:
-            utterance = normalize(text)
-            if any(x in utterance for x in OPT_OUT):
+            intent = critical_intent(text)
+            if intent == 'dnc':
                 await asyncio.to_thread(mark_do_not_call, self.call_id)
                 await self._send_audio('Entendido. Su número queda excluido de futuras pruebas. Gracias.', goodbye=True)
                 return
-            if any(x in utterance for x in GOODBYE):
+            if intent == 'consent_denied':
+                record_call_event(self.call_id, 'consent', 'denied')
+                await self._send_audio('Entendido. Respetamos su decisión y finalizamos la llamada.', goodbye=True)
+                return
+            if not self.consent_accepted:
+                if consent_accepted(text):
+                    self.consent_accepted = True
+                    record_call_event(self.call_id, 'consent', 'accepted')
+                    await self._send_audio('Gracias por confirmar. ¿En qué puedo orientarle?')
+                else:
+                    record_call_event(self.call_id, 'consent', 'not_confirmed')
+                    await self._send_audio('Sin su confirmación no continuaré. Finalizamos la llamada.', goodbye=True)
+                return
+            if intent == 'private':
+                await self._send_audio('No comparta claves ni datos privados. Finalizamos esta prueba.', goodbye=True)
+                return
+            if intent in {'fraud', 'human', 'complaint'}:
+                record_call_event(self.call_id, 'policy', intent)
+                await self._send_audio('Esto requiere atención humana. El piloto no conecta con asesores reales. '
+                                       'Por seguridad finalizamos la llamada.', goodbye=True)
+                return
+            if any(x in text.lower() for x in GOODBYE):
                 await self._send_audio('Gracias por su tiempo. Finalizamos esta llamada de prueba.', goodbye=True)
                 return
             self.utterances += 1
@@ -200,14 +231,25 @@ class CallBridge:
             started = time.perf_counter()
             result, self.session = await asyncio.wait_for(
                 asyncio.to_thread(respond, text, self.session, 'LIVE'), timeout=35)
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            record_call_event(self.call_id, 'agent', 'error' if result.status == 'PROVIDER_ERROR' else 'ok', elapsed_ms)
+            for provider, tokens, variable in (
+                    ('anthropic_input_tokens', result.llm_input_tokens, 'LLM_INPUT_USD_PER_MILLION'),
+                    ('anthropic_output_tokens', result.llm_output_tokens, 'LLM_OUTPUT_USD_PER_MILLION'),
+            ):
+                if tokens:
+                    tariff = configured_tariff(variable)
+                    record_provider_usage(self.call_id, provider, tokens,
+                                          tokens * tariff / 1e6 if tariff is not None else None)
             log.info('voice_agent call_ref=%s duration_ms=%.1f outcome=%s',
-                     self.call_ref, (time.perf_counter() - started) * 1000,
+                     self.call_ref, elapsed_ms,
                      'error' if result.status == 'PROVIDER_ERROR' else 'ok')
             if result.status == 'PROVIDER_ERROR':
                 await self._send_audio('El asistente no está disponible ahora. Finalizamos la llamada.', goodbye=True)
             else:
                 await self._send_audio(result.text)
         except Exception:
+            record_call_event(self.call_id, 'agent', 'error')
             log.warning('Fallo procesando un turno de voz: %s', self.call_id, exc_info=False)
             try:
                 await self._send_audio('Disculpe, ocurrió un error técnico. Finalizamos la prueba.', goodbye=True)
@@ -250,6 +292,9 @@ class CallBridge:
                 if complete:
                     if self.worker and not self.worker.done():
                         continue
+                    if self.last_media_at is not None:
+                        record_call_event(self.call_id, 'stt_approx', 'ok',
+                                          (time.perf_counter() - self.last_media_at) * 1000)
                     self.worker = asyncio.create_task(self.handle_transcription(complete))
 
     async def run(self):
@@ -276,12 +321,14 @@ class CallBridge:
                             await self._terminate()
                             break
                     if event == 'media' and not self.speaking and not self.processing:
+                        self.last_media_at = time.perf_counter()
                         payload = message.get('media', {}).get('payload', '')
                         if isinstance(payload, str) and len(payload) < 32000:
                             try:
                                 chunk = base64.b64decode(payload, validate=True)
                                 if chunk:
                                     await dg.send(chunk)
+                                    self.deepgram_audio_bytes += len(chunk)
                             except Exception:
                                 # Resistente a paquetes malformados; solo remitentes autenticados.
                                 pass
@@ -289,6 +336,11 @@ class CallBridge:
                         log.warning('Deepgram perdió conexión durante llamada', exc_info=False)
                         break
             finally:
+                seconds = self.deepgram_audio_bytes / 8000  # μ-law 8-bit/8 kHz
+                rate = configured_tariff('DEEPGRAM_USD_PER_MINUTE')
+                if seconds:
+                    record_provider_usage(self.call_id, 'deepgram_audio_seconds', seconds,
+                                          seconds * rate / 60 if rate is not None else None)
                 listener.cancel()
                 keepalive.cancel()
                 await asyncio.gather(listener, keepalive, return_exceptions=True)
@@ -330,10 +382,12 @@ async def media_stream(ws: WebSocket):
             await ws.close(code=1008)
             return
         bridge = CallBridge(ws, call_id, sid, stream_sid)
+        record_call_event(call_id, 'stream', 'started')
         log.info('voice_stream_started call_ref=%s', bridge.call_ref)
         try:
             await bridge.run()
         finally:
+            record_call_event(call_id, 'stream', 'ended')
             log.info('voice_stream_ended call_ref=%s turns=%d',
                      bridge.call_ref, bridge.utterances)
     except (asyncio.TimeoutError, WebSocketDisconnect):

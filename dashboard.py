@@ -95,7 +95,7 @@ def agent_hash() -> str:
     import hashlib
 
     h = hashlib.sha256()
-    for p in ("src/agent.py", "src/nlu.py", "src/tools.py"):
+    for p in ("src/agent.py", "src/nlu.py", "src/critical_policy.py", "src/tools.py"):
         h.update((ROOT / p).read_bytes())
     return h.hexdigest()[:12]
 
@@ -164,7 +164,7 @@ res = montecarlo.run(perf_s, n=int(n_sim), seed=int(seed), overrides=overrides)
 o = res.outputs
 
 tabs = st.tabs(["Resumen", "Desempeño del modelo", "Monte Carlo", "Sensibilidad", "Diagnóstico MCMC",
-                "Probar el agente", "Supuestos y fuentes", "Telemetría Gradio"])
+                "Probar el agente", "Supuestos y fuentes", "Telemetría Gradio", "Telefonía observada"])
 
 # ----------------------------------------------------------------------------- 1. resumen
 with tabs[0]:
@@ -395,7 +395,7 @@ with tabs[7]:
     st.markdown("#### Métricas locales de Gradio")
     st.caption(
         "Estos indicadores proceden de SQLite. No representan una medición de precisión, WER, satisfacción ni costos LIVE.")
-    from src.storage import telemetry_summary
+    from src.storage import counts, telemetry_summary
 
     try:
         telemetry = telemetry_summary()
@@ -413,3 +413,50 @@ with tabs[7]:
             c3.metric("Latencia aplicación P95", "Sin datos" if p95 is None else f"{p95:,.1f} ms")
     st.info(
         "Las llamadas reales gestionadas por Twilio se registran en sus eventos y logs; no se incluyen en los contadores Gradio.")
+
+    st.markdown("#### Operaciones sintéticas registradas")
+    st.caption("Conteos de tablas de prueba; no son conversiones ni operaciones de un banco real.")
+    try:
+        synthetic_counts = counts()
+    except Exception as exc:
+        st.warning(f"Conteos no disponibles: {type(exc).__name__}")
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Prospectos de prueba", synthetic_counts["leads"])
+        c2.metric("Devoluciones simuladas", synthetic_counts["callbacks"])
+        c3.metric("Derivaciones simuladas", synthetic_counts["transfers"])
+
+# ----------------------------------------------------------------------------- eventos telefónicos observados
+with tabs[8]:
+    st.markdown("#### Telemetría telefónica (piloto LIVE)")
+    st.caption("Conteos y latencias registrados localmente. Sin contenido, audio ni números. "
+               "La latencia STT es solo una aproximación, no una medición de WER.")
+    from src.observability import call_telemetry_summary, usage_summary
+
+    data = call_telemetry_summary()
+    st.metric("Eventos telefónicos registrados", data["events"])
+    if data["events"] == 0:
+        st.info("No se han registrado eventos telefónicos en esta instancia.")
+    else:
+        st.dataframe(pd.DataFrame([
+            {"Etapa": k, "Mediciones": v["count"], "P50 (ms)": v["p50_ms"], "P95 (ms)": v["p95_ms"]}
+            for k, v in data["stages"].items()
+            if k in {"agent", "tts", "stt_approx"}
+        ]), hide_index=True, width="stretch")
+        st.markdown("**Eventos de estado Twilio**")
+        st.json(data["call_status_events"])
+    st.warning("No equiparar eventos Twilio con llamadas resueltas, ni métricas sintéticas con datos LIVE.")
+
+    usage = usage_summary()
+    st.markdown("**Consumo observado de proveedores (no facturación)**")
+    if not usage["records"]:
+        st.caption("Todavía no hay unidades de consumo registradas.")
+    else:
+        st.dataframe(pd.DataFrame([{"Proveedor": k, "Unidades": v} for k, v in
+                                   sorted(usage["units_by_provider"].items())]), hide_index=True)
+        st.metric("Subtotal estimado con tarifas configuradas (USD)",
+                  "Sin tarifas" if usage["partial_estimated_usd"] is None
+                  else f"${usage['partial_estimated_usd']:.4f}")
+        st.caption(f"Consumos con tarifa: {usage['priced_records']}; sin tarifa: {usage['unpriced_records']}.")
+    st.warning("NO es el costo completo de una llamada: faltan telefonía Twilio, impuestos, "
+               "almacenamiento y conciliación de la factura real.")

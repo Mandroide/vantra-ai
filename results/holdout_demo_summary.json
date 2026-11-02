@@ -1,11 +1,11 @@
 {
-  "generated_utc": "2026-11-02T00:54:06.632946+00:00",
+  "generated_utc": "2026-11-02T02:28:58.204433+00:00",
   "mode": "DEMO",
   "set": "v1",
   "tag": "",
   "model": null,
   "price_usd_per_mtok": null,
-  "duration_s": 0.1,
+  "duration_s": 0.4,
   "global": {
     "n": 102,
     "exactitud_pct": 100.0,
@@ -17,8 +17,8 @@
     "resuelto_por_reglas_pct": 100.0,
     "derivado_llm_pct": 0.0,
     "sin_resolver_pct": 0.0,
-    "latencia_media_ms": 0.54,
-    "latencia_p95_ms": 1.59,
+    "latencia_media_ms": 4.08,
+    "latencia_p95_ms": 15.54,
     "tokens_media": 0,
     "costo_medio_usd": null
   },

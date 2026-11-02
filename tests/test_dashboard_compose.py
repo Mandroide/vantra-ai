@@ -31,3 +31,16 @@ def test_fallback_propagated_to_both_services():
     compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
     for service in ("vantra", "twilio-webhook"):
         assert "VANTRA_FALLBACK" in compose["services"][service]["environment"]
+
+
+def test_streamlit_is_the_only_dashboard():
+    """Evita regresar a dos tableros y preserva los conteos sinteticos en Streamlit."""
+    gradio = (ROOT / "app.py").read_text(encoding="utf-8")
+    streamlit = (ROOT / "dashboard.py").read_text(encoding="utf-8")
+    assert "Operación · indicadores locales" not in gradio
+    assert "Datos de prueba" not in gradio
+    assert "telemetry_summary()" not in gradio
+    assert "from src.storage import counts, telemetry_summary" in streamlit
+    assert "Prospectos de prueba" in streamlit
+    assert "Devoluciones simuladas" in streamlit
+    assert "Derivaciones simuladas" in streamlit

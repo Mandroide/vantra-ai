@@ -8,6 +8,7 @@ import json, os, re, time, unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 from src import nlu
+from src.critical_policy import critical_intent
 from src.config import env, key
 from src.tools import CATALOG, SCHEMAS, execute
 
@@ -127,29 +128,30 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
     c = nlu.canon(raw)
     product = _product(c, session.last_product)
     session.last_product = product
-    # Prioridad máxima, en este orden: datos privados, consentimiento, exclusión de llamadas y fraude.
+    # Política crítica única para chat y voz, priorizando DNC y revocación.
+    critical = critical_intent(raw)
     # La exclusión va antes que «me llamen» para que «no me llamen más» no se convierta en una devolución.
-    if nlu.is_private(c):
-        out.status = 'DENIED'
-        return finish(
-            'No puedo acceder a saldos, cuentas ni credenciales reales. No comparta datos sensibles. Banco Demo es ficticio.')
-    if nlu.is_consent_denied(c):
-        out.status = 'CONSENT_DENIED'
-        return finish(
-            'Se respeta su decisión. No envíe audio; puede continuar por texto. Este prototipo no inicia grabaciones desde el servidor.')
-    if nlu.is_do_not_call(c):
+    if critical == 'dnc':
         out.status = 'DNC_REQUESTED'
         session.pending = ''
         return finish(
             'Entendido. No se iniciará ninguna campaña ni llamada real. Se respeta su preferencia de no contacto.')
-    if nlu.is_fraud(c):
+    if critical == 'private':
+        out.status = 'DENIED'
+        return finish(
+            'No puedo acceder a saldos, cuentas ni credenciales reales. No comparta datos sensibles. Banco Demo es ficticio.')
+    if critical == 'consent_denied':
+        out.status = 'CONSENT_DENIED'
+        return finish(
+            'Se respeta su decisión. No envíe audio; puede continuar por texto. Este prototipo no inicia grabaciones desde el servidor.')
+    if critical == 'fraud':
         r = _call(out, 'request_human_transfer', {'reason': 'fraude'})
         return finish(
             f'Por seguridad, detengo este trámite y registro escalamiento ficticio #{r["id"]}. No puedo bloquear una cuenta real.')
-    if nlu.is_human(c):
+    if critical == 'human':
         r = _call(out, 'request_human_transfer', {'reason': 'solicitud'})
         return finish(f'Registré transferencia simulada #{r["id"]}. No existe conexión con un operador real.')
-    if nlu.is_complaint(c):
+    if critical == 'complaint':
         r = _call(out, 'request_human_transfer', {'reason': 'queja'})
         return finish(f'Lamento la situación. Se generó una transferencia simulada #{r["id"]} para seguimiento humano.')
     if nlu.is_approval(c):

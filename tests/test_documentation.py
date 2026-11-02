@@ -19,7 +19,10 @@ GUIDES = (
 
 
 def test_eight_canonical_markdown_files():
-    assert set(ROOT.glob("*.md")) | set(DOCS.glob("*.md")) == set(GUIDES)
+    # Las ocho guías son obligatorias. Guías adicionales (por ejemplo, informes
+    # académicos) no deben convertir en inválido un repositorio actualizado.
+    available = set(ROOT.glob("*.md")) | set(DOCS.glob("*.md"))
+    assert set(GUIDES) <= available
 
 
 def test_relative_documentation_links_exist():
@@ -42,7 +45,7 @@ def test_configuration_guide_lists_runtime_variables():
             "AZURE_SPEECH_REGION", "TWILIO_CALLS_ENABLED", "TWILIO_ACCOUNT_SID",
             "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_PUBLIC_BASE_URL",
             "TWILIO_TEST_NUMBERS", "TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS",
-            "TWILIO_DAILY_CALL_LIMIT", "CONNECTIVITY_PROVIDER", "NGROK_AUTHTOKEN",
+            "TWILIO_DAILY_CALL_LIMIT", "VANTRA_PHONE_HASH_KEY", "CONNECTIVITY_PROVIDER", "NGROK_AUTHTOKEN",
             "CLOUDFLARE_TUNNEL_TOKEN", "VANTRA_PUBLIC_HOST", "CADDY_EMAIL",
     ):
         assert f"{field}=" in example, field

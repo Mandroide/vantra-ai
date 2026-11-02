@@ -105,7 +105,8 @@ variables sensibles).
 
 ## Dashboard Streamlit dentro de Docker (Fase 3 consolidada)
 
-Conserve el `.env` que ya configuró. El dashboard se ejecuta como **servicio opcional** y no reemplaza Gradio:
+Conserve el `.env` que ya configuró. El **único dashboard** se ejecuta como servicio opcional Streamlit. Gradio se
+mantiene solo para interacción con el agente y telefonía:
 
 ```powershell
 docker compose -f compose.yaml -f compose.dashboard.yaml up -d --build
@@ -126,3 +127,9 @@ Ejecución local: `uv sync --locked --group dev --group dashboard` seguido de
 
 El código anterior de simulación DOP del borrador se dejó fuera por ser un modelo diferente del MCMC/Monte Carlo
 presentado en la Fase 3.
+
+## Configuración extra para LIVE (v0.4)
+
+Añada `VANTRA_PHONE_HASH_KEY` a `.env` antes de activar llamadas y manténgala estable. Reconstruya con
+`docker compose up -d --build --force-recreate`. Conserve el volumen `vantra_state`. Para instalaciones con DNC previas,
+ejecute [migración interactiva](telephony.md) antes de cambiar el token anterior.

@@ -75,3 +75,11 @@ cada proveedor y el proceso de migración.
 `compose.dashboard.yaml` instala Streamlit en un contenedor separado. No requiere credenciales Twilio y opera en modo
 DEMO; utiliza el almacenamiento SQLite existente para telemetría. El túnel solo debe apuntar al webhook, nunca al
 dashboard.
+
+## Configuración v0.4: secreto telefónico independiente
+
+`VANTRA_PHONE_HASH_KEY` es **obligatoria para LIVE con Twilio** (mínimo 32 bytes), diferente de `TWILIO_AUTH_TOKEN` y
+estable entre actualizaciones de Docker. Genérela localmente con
+`python -c "import secrets; print(secrets.token_urlsafe(48))"` y cópiela a `.env`, nunca a GitHub. `compose.yaml` la
+inyecta tanto en `vantra` como en `twilio-webhook`. Si ya existe una DNC antigua, consulte [migración](telephony.md)
+**antes** de rotar el token de Twilio.

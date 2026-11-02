@@ -98,6 +98,32 @@ aprobados y permisos de acceso a las evidencias. Para riesgos específicos, cons
 automáticamente WER a las llamadas reales: esto requiere audio transcrito por personas autorizadas y de referencia.
 
 `src/storage.py` registra conteos y latencia de las interacciones con Gradio. Su unidad de análisis es la solicitud a la
-interfaz, no una llamada telefónica completada. Estos conteos se muestran en Gradio y en la pestaña final del dashboard
-de Streamlit. El modelo probabilístico de negocio sigue siendo `analytics/montecarlo.py`, con `analytics/mcmc.py` para
-incertidumbre de desempeño. Los resultados del held-out v2 congelado no se reescriben para reflejar otra metodología.
+interfaz, no una llamada telefónica completada. Estos conteos se muestran exclusivamente en el dashboard de Streamlit,
+junto con los conteos de operaciones sintéticas. El modelo probabilístico de negocio sigue siendo
+`analytics/montecarlo.py`, con `analytics/mcmc.py` para incertidumbre de desempeño. Los resultados del held-out v2
+congelado no se reescriben para reflejar otra metodología.
+
+## Evaluación LIVE a partir de anotaciones autorizadas (v0.4)
+
+Copie `data/live_evaluation_template.csv` a `data/live_inputs/pruebas.csv` (ruta excluida de Git). Introduzca únicamente
+referencias de pruebas consentidas y sin información personal: `scenario_id`, `register`, intenciones de
+referencia/predicha, transcripciones STT/revisada, latencia integral en ms y marcas `true`/`false` de tarea y política
+crítica. Para casos no críticos deje `critical_policy_pass` vacío.
+
+```powershell
+python -m scripts.evaluate_live_voice data/live_inputs/pruebas.csv
+```
+
+Escribe agregados locales en `results/live_metrics_private.json`: n, WER promedio por intervención, macro-F1, éxito,
+latencia P50/P95 y política crítica por registro. **No inicia llamadas ni produce métricas LIVE por sí solo**. El WER
+calculado es promedio de frases, no WER de corpus ponderado por palabras. El módulo `src/observability.py` contiene solo
+tiempos parciales/estados operativos, no etiquetas de referencia. El conjunto congelado de 114 frases permanece sin
+modificaciones.
+
+### Consumos LIVE y estimaciones parciales
+
+La pestaña *Telefonía observada* contabiliza tokens de entrada/salida de Claude, caracteres TTS y segundos de audio
+enviados a Deepgram. Si en `.env` existen tarifas unitarias **positivas verificadas** (`LLM_INPUT_USD_PER_MILLION`,
+`LLM_OUTPUT_USD_PER_MILLION`, `AZURE_USD_PER_MILLION_CHARACTERS`, `DEEPGRAM_USD_PER_MINUTE`), estima únicamente el
+subtotal de esos componentes. No incorpora costo de Twilio, impuestos, mínimos, otros proveedores ni conciliación de
+facturación. Si una tarifa falta, su costo se muestra como desconocido, nunca como cero.

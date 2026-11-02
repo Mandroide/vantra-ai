@@ -26,9 +26,12 @@ def configured(tmp_path, monkeypatch):
     variables = {
         'VANTRA_MODE': 'LIVE', 'TWILIO_CALLS_ENABLED': 'true',
         'TWILIO_ACCOUNT_SID': ACCOUNT, 'TWILIO_AUTH_TOKEN': 'test-only-auth-token',
+        'VANTRA_PHONE_HASH_KEY': 'test-key-solely-for-tests-' + 'X' * 40,
         'TWILIO_FROM_NUMBER': '+15551234567',
         'TWILIO_PUBLIC_BASE_URL': 'https://voice-test.example.com',
         'TWILIO_TEST_NUMBERS': ALLOW,
+        # Aislar las pruebas del .env local: el override de horario es opt-in.
+        'TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS': 'false',
         'DEEPGRAM_API_KEY': 'fake', 'AZURE_SPEECH_KEY': 'fake',
         'AZURE_SPEECH_REGION': 'eastus', 'ANTHROPIC_API_KEY': 'fake',
     }

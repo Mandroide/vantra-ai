@@ -33,9 +33,9 @@ previamente autorizados** con Twilio.
 Esta versión toma como **base el repositorio de la Fase 3 presentado por el equipo**. Conserva `src/nlu.py`, el held-out
 v2 congelado, la inferencia MCMC, el análisis Monte Carlo y el dashboard Streamlit.
 Del borrador anterior se incorporan únicamente utilidades **compatibles y complementarias**: telemetría local sin
-texto/audio, funciones de WER/F1/latencias y una pestaña operativa en Gradio. **No se incorpora el modelo alternativo de
-ROI de 12 meses**, ya que los supuestos, monedas y horizontes difieren; la fuente de referencia económica es
-`analytics/montecarlo.py`, con supuestos en `analytics/assumptions.py`.
+texto/audio y funciones de WER/F1/latencias, visualizadas exclusivamente en Streamlit. **No se incorpora el modelo
+alternativo de ROI de 12 meses**, ya que los supuestos, monedas y horizontes difieren; la fuente de referencia económica
+es `analytics/montecarlo.py`, con supuestos en `analytics/assumptions.py`.
 
 Resultados del held-out v2: 17/114 (14.9 %) antes, 83/114 (72.8 %) después, en modo DEMO. Son **evaluaciones textuales
 sintéticas**, no precisión medida en llamadas LIVE. Se mantienen los archivos de evidencia de la presentación sin
@@ -43,10 +43,11 @@ alterar su huella.
 
 ## Dos interfaces, un solo modelo de negocio
 
-- **Gradio (puerto local 7860):** conversación, voz, telefonía autorizada y métricas de uso local de Gradio (sin
-  contenido de usuario).
-- **Streamlit (puerto local 8501):** evaluación con held-out v2, MCMC, Monte Carlo, sensibilidad, supuestos, diagnóstico
-  y telemetría de Gradio. Los escenarios económicos del informe proceden de esta implementación.
+- **Gradio (puerto local 7860):** conversación, voz, telefonía autorizada y gestión de exclusiones DNC. **No incluye
+  dashboard analítico.**
+- **Streamlit (puerto local 8501): único dashboard para evaluación held-out v2, MCMC, Monte Carlo, sensibilidad,
+  supuestos, diagnóstico, telemetría de Gradio y operaciones sintéticas. Los escenarios económicos del informe proceden
+  de esta implementación.
 
 Para ejecutar ambas interfaces con Docker (sin túnel):
 
@@ -68,6 +69,26 @@ uv run --locked --group dashboard streamlit run dashboard.py
 Si usas un `.env` de la Fase 3, puedes elegir `VANTRA_FALLBACK=humano` para derivar consultas no comprendidas; el valor
 `texto` se mantiene para reproducir la evaluación congelada. El overlay Docker propaga el modo configurado en
 `compose.yaml`.
+
+## Si actualiza una carpeta que contenía el dashboard Gradio antiguo
+
+**No copie el ZIP sobre archivos heredados sin revisar las diferencias**: la extracción de un ZIP no elimina archivos
+obsoletos. Si Pytest intenta importar `tests/test_impact.py` o `src/dashboard/executive.py`, está utilizando módulos del
+borrador anterior, **no** del repositorio unificado. El dashboard oficial es `dashboard.py` (Streamlit), y los cálculos
+económicos oficiales son `analytics/mcmc.py` y `analytics/montecarlo.py`.
+
+En PyCharm, conserve primero sus cambios en Git. Compruebe los archivos antiguos con `git status --short` y
+`git ls-files tests/test_impact.py src/dashboard/executive.py src/impact.py`. Mueva esos módulos y las pruebas
+dependientes a una copia de seguridad **fuera de la carpeta del proyecto** antes de ejecutar Pytest. No borre `.env`,
+SQLite, ni el volumen Docker de Vantra. No instale Matplotlib únicamente para mantener el dashboard antiguo.
+
+Para validar el dashboard Streamlit localmente instale su grupo opcional de dependencias:
+
+```powershell
+uv sync --locked --group dev --group dashboard
+uv run --locked --group dashboard python -m pytest -q
+uv run --locked --group dashboard streamlit run dashboard.py
+```
 
 ## Inicio rápido con Docker
 
@@ -233,3 +254,30 @@ más allá de pruebas consentidas.
 **Entregables académicos:** el informe PDF, Canvas, reflexión extensa y evidencias finales se mantienen **fuera del
 repositorio de software**, en la carpeta de entrega de la asignatura. Las funciones codificadas no se consideran pruebas
 de aceptación de APIs reales.
+
+## Cambios de seguridad y medición v0.4.0
+
+La política crítica se comparte entre el chat y el servidor telefónico (`src/critical_policy.py`). En las llamadas se
+solicita confirmación verbal inequívoca **además del consentimiento previo documentado** antes de procesar consultas
+generales. Los pedidos de exclusión DNC, privacidad, fraude y atención humana se reconocen sin depender de Claude; no
+existe transferencia humana real.
+
+**Antes de habilitar llamadas LIVE** cree un secreto estable distinto del token de Twilio:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Guárdelo exclusivamente en `.env` bajo `VANTRA_PHONE_HASH_KEY`. El nuevo formato HMAC `v2:` preserva exclusiones frente
+a la rotación de `TWILIO_AUTH_TOKEN`. Si hay hashes DNC heredados, **se bloquean las llamadas**
+hasta [migrarlos](docs/telephony.md); no se eliminan automáticamente. No comparta ni versione secretos.
+
+Las métricas telefónicas se visualizan en una pestaña separada del dashboard Streamlit (`src/observability.py`), sin
+audios, transcripciones ni números. Para evaluar WER/F1/latencia con anotaciones autorizadas se proporciona
+`data/live_evaluation_template.csv` y `python -m scripts.evaluate_live_voice data/live_inputs/pruebas.csv`. El archivo
+de entrada es privado; por defecto no existen resultados LIVE. CI ejecuta la batería de seguridad y exige cobertura
+inicial del 70 %.
+
+**Costos:** las unidades LIVE registradas en SQLite permiten estimar un subtotal con tarifas configuradas; la factura
+completa de Twilio/servicios sigue sin verificarse. El ROI continúa siendo una proyección Monte Carlo independiente de
+estos registros.

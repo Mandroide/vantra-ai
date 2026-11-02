@@ -27,8 +27,11 @@ def test_holdout_demo_es_determinista(tmp_path):
 
 
 def test_holdout_v2_congelado_no_cambio():
-    import hashlib
+    from scripts.verify_frozen_holdout import verify_frozen_holdout
 
-    expected = (ROOT / "data/holdout_v2.sha256").read_text(encoding="utf-8").split()[0]
-    actual = hashlib.sha256((ROOT / "data/holdout_v2_scenarios.json").read_bytes()).hexdigest()
-    assert actual == expected, "El held-out v2 congelado fue modificado"
+    status, actual, expected = verify_frozen_holdout()
+    assert status in ("original", "crlf"), (
+        "El held-out v2 congelado NO coincide con la evidencia: "
+        f"SHA256={actual}, esperado={expected}. "
+        "Solo se admite conversión LF/CRLF; restaure el JSON desde el ZIP original."
+    )

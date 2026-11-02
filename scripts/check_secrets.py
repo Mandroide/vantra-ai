@@ -25,11 +25,21 @@ DETECT = [
 
 def checked_paths() -> list[Path]:
     """En Git inspecciona solo archivos versionados; en ZIP usa filtros conservadores."""
-    result = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, check=False
-    )
-    if result.returncode == 0 and result.stdout:
-        return [ROOT / name.decode("utf-8") for name in result.stdout.split(b"\0") if name]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, check=False
+        )
+    except OSError:
+        # Git no es obligatorio al revisar un ZIP extraído o una imagen Docker.
+        result = None
+    if result is not None and result.returncode == 0 and result.stdout:
+        # Al actualizar una carpeta sobre un checkout anterior, el índice puede
+        # contener rutas eliminadas. No son archivos que puedan filtrar secretos.
+        # Windows lanza WinError 3 si se intenta hacer stat() sobre esas rutas.
+        return [
+            path for name in result.stdout.split(b"\0") if name
+            if (path := ROOT / name.decode("utf-8")).is_file()
+        ]
     return [
         p
         for p in ROOT.rglob("*")
@@ -44,13 +54,18 @@ def main() -> int:
         if path.name in BAD_NAMES or path.suffix.lower() in BAD_EXT:
             failures.append(f"{rel}: archivo sensible incluido")
             continue
-        if path.stat().st_size > 1_000_000 or path.suffix.lower() in {
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            # Tolerar archivos borrados entre la consulta a Git y el escaneo.
+            continue
+        if size > 1_000_000 or path.suffix.lower() in {
             ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".zip", ".pdf", ".docx",
         }:
             continue
         try:
             contents = path.read_text(encoding="utf-8")
-        except UnicodeError:
+        except (UnicodeError, FileNotFoundError):
             continue
         if path.name == ".env.example":
             # Archivo de ejemplo: conserva las claves vacías, pero detecta tokens reales.

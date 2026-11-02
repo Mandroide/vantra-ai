@@ -72,3 +72,15 @@ públicamente requeriría autenticación, control de acceso y pruebas adicionale
 No se deben combinar los porcentajes de exactitud textual del held-out v2 con los conteos de interacciones Gradio para
 declarar un éxito operativo medido. Los modelos económicos alternativos del borrador se excluyeron para no presentar ROI
 incompatibles bajo una misma marca.
+
+## Endurecimiento v0.4
+
+La misma política de intenciones críticas se utiliza en Gradio y las llamadas para evitar contradicciones, aunque se
+necesita evaluación independiente de sinónimos y expresiones regionales. En llamadas reales existe autorización
+documentada previa para contactar y procesar la voz; el agente solicita además confirmación verbal, y ante rechazo
+finaliza sin consultar Claude. **Deepgram sí procesa la respuesta verbal necesaria para reconocer la confirmación.**
+
+El HMAC DNC depende de un secreto independiente del token Twilio; la migración de entradas heredadas es explícita y
+falla cerrada si no se puede resolver un hash histórico. Eventos y IDs de llamadas constituyen datos seudonimizados y
+requieren acceso restringido, retención definida y eliminación segura. Las rutas de escalamiento siguen siendo
+simuladas: nunca afirmar transferencia real a un operador.

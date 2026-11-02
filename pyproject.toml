@@ -1,6 +1,6 @@
 [project]
 name = "vantra-ai"
-version = "0.3.0"
+version = "0.4.0"
 description = "MVP académico reproducible de agente bancario ficticio con interfaz Gradio"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -39,7 +39,7 @@ testpaths = ["tests"]
 addopts = "-ra"
 
 [tool.coverage.run]
-source = ["src", "app"]
+source = ["src", "analytics", "app"]
 branch = true
 
 [tool.coverage.report]

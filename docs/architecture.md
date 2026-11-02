@@ -112,3 +112,17 @@ Despliegue opcional: `compose.dashboard.yaml` crea el servicio `dashboard`, inst
 desde `uv.lock` y expone Streamlit solamente en `127.0.0.1:8501`. Se pueden combinar sus servicios con
 `compose.ngrok.yaml`, `compose.cloudflare.yaml` o `compose.direct.yaml`. El servidor público nunca debe publicar Gradio
 ni Streamlit sin autenticación.
+
+## Módulos v0.4
+
+`src/critical_policy.py` aplica una misma prioridad de intenciones sensibles en texto y telefonía; `src/telephony.py`
+conserva reservas SQLite, HMAC DNC independiente y webhooks firmados; `src/observability.py` añade eventos enumerados y
+agregaciones telefónicas sin guardar audio ni texto. `scripts/evaluate_live_voice.py` calcula métricas de anotaciones
+locales, mientras `analytics/` conserva sin mezclar el modelo financiero original de Fase 3. La nueva pestaña de
+Streamlit separa datos telefónicos observados de los escenarios económicos simulados.
+
+### Separación de interfaces
+
+Gradio es exclusivamente la consola de interacción y telefonía de prueba; las métricas agregadas, los conteos
+sintéticos, las simulaciones y el análisis se muestran solamente en Streamlit (`dashboard.py`). No existe un dashboard
+paralelo en Gradio.

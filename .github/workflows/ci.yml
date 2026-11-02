@@ -49,8 +49,10 @@ jobs:
         run: uv run --locked --group dashboard python -m pytest -q tests/test_connectivity.py
       - name: Verificar secretos y archivos sensibles
         run: uv run --locked --group dashboard python scripts/check_secrets.py
+      - name: Pruebas críticas de telefonía y privacidad
+        run: uv run --locked --group dashboard python -m pytest -q tests/test_security_v040.py
       - name: Pruebas y cobertura
-        run: uv run --locked --group dashboard python -m pytest -q --cov=src --cov=app --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
+        run: uv run --locked --group dashboard python -m pytest -q --cov=src --cov=analytics --cov=app --cov-branch --cov-fail-under=70 --cov-report=term-missing --cov-report=xml:coverage.xml
       - name: Evaluación reproducible sin proveedores externos
         run: uv run --locked --group dashboard python scripts/run_evaluation.py
       - name: Comprobar resultados 36 casos
