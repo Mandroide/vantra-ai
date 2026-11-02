@@ -6,14 +6,13 @@ FROM python:3.12-slim-bookworm AS builder
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 WORKDIR /app
 ENV UV_NO_DEV=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
-# Copiamos el proyecto completo para admitir la primera construcción sin uv.lock.
-# Tras generar/commitear uv.lock, este build exige que coincida con pyproject.toml.
+ARG WITH_DASHBOARD=false
+# Se usa uv.lock versionado; sin él la construcción debe fallar (reproducibilidad).
 COPY . .
-RUN if [ -f uv.lock ]; then \
-      uv sync --locked --no-dev --no-install-project; \
+RUN if [ "$WITH_DASHBOARD" = "true" ]; then \
+      uv sync --locked --no-dev --group dashboard --no-install-project; \
     else \
-      echo 'ADVERTENCIA: uv.lock sin versionar; build no totalmente reproducible'; \
-      uv sync --no-dev --no-install-project; \
+      uv sync --locked --no-dev --no-install-project; \
     fi
 
 FROM python:3.12-slim-bookworm
@@ -35,6 +34,9 @@ COPY --chown=vantra:vantra app.py ./app.py
 COPY --chown=vantra:vantra src ./src
 COPY --chown=vantra:vantra scripts ./scripts
 COPY --chown=vantra:vantra data ./data
+COPY --chown=vantra:vantra analytics ./analytics
+COPY --chown=vantra:vantra dashboard.py ./dashboard.py
+COPY --chown=vantra:vantra results ./results
 USER vantra
 EXPOSE 7860
 CMD ["python", "app.py"]

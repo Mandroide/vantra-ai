@@ -31,3 +31,8 @@ Thumbs.db
 # Archivos temporales
 *.tmp
 *.bak
+
+# Anotaciones de voluntarios: locales, nunca en repositorio
+data/live_inputs/
+results/live_metrics_private.json
+results/live_voice_*.json

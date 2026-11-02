@@ -35,6 +35,9 @@ flowchart TD
 |------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
 | `app.py`                                                               | Interfaz, chat, consentimiento de audio, simulación y llamada manual restringida.                      |
 | `src/agent.py`                                                         | Reglas, decisiones y uso de Claude cuando corresponda.                                                 |
+| `src/nlu.py`                                                           | Texto canónico tolerante a errores de STT, números en palabras e intenciones con prioridad crítica.    |
+| `analytics/`, `scripts/run_simulation.py`                              | Métricas por intención, MCMC jerárquico, Monte Carlo del impacto y sensibilidad.                       |
+| `dashboard.py`                                                         | Cuadro de mando Streamlit para decisión: KPIs, simulación en vivo y prueba del agente.                 |
 | `src/tools.py`                                                         | Consulta del catálogo, cuotas y políticas deterministas.                                               |
 | `src/speech.py`                                                        | Audio grabado hacia Deepgram y síntesis Azure por archivo.                                             |
 | `src/telephony.py`                                                     | Validación RD E.164, DNC, allowlist, límites, solicitudes y reconciliación de estados con Twilio REST. |
@@ -85,3 +88,41 @@ marcación por lotes. El código de los conectores **no demuestra por sí solo**
 métricas deben registrarse por separado.
 
 Véanse [instalación](installation.md), [telefonía](telephony.md) y [evaluación](evaluation.md).
+
+## Despliegue de la Fase 3
+
+El orden de decisión del motor DEMO es: datos privados, consentimiento de audio, exclusión de llamadas, fraude,
+asesor humano, quejas, aprobación y, después, las intenciones operativas. Con `VANTRA_FALLBACK=humano` toda consulta
+no entendida se deriva a un asesor; es la política recomendada para un piloto, mientras que la evaluación usa
+`texto` para medir comprensión y no la política de derivación. El cuadro de mando (`dashboard.py`, puerto 8501) es de
+uso interno: como Gradio, no tiene autenticación propia y no debe publicarse.
+
+## Interfaces y telemetría integradas
+
+La capa de negocio de Fase 3 (`analytics/`) y el held-out v2 constituyen la única fuente para las conclusiones
+probabilísticas. El dashboard `dashboard.py` (Streamlit) no reutiliza cifras calculadas con el modelo hipotético de 12
+meses del borrador; ese modelo se omitió para evitar escenarios económicos contradictorios.
+
+La aplicación Gradio registra en la tabla `interaction_metrics` únicamente modo, categoría de estado, duración total y
+fecha. El mismo volumen SQLite está disponible en el dashboard bajo Docker para mostrar conteos y percentiles por modo.
+No se guarda el contenido conversacional. Esta telemetría **no** registra el trayecto de Twilio ni permite estimar WER,
+efectividad o costos de proveedor.
+
+Despliegue opcional: `compose.dashboard.yaml` crea el servicio `dashboard`, instala el grupo de dependencias `dashboard`
+desde `uv.lock` y expone Streamlit solamente en `127.0.0.1:8501`. Se pueden combinar sus servicios con
+`compose.ngrok.yaml`, `compose.cloudflare.yaml` o `compose.direct.yaml`. El servidor público nunca debe publicar Gradio
+ni Streamlit sin autenticación.
+
+## Módulos v0.4
+
+`src/critical_policy.py` aplica una misma prioridad de intenciones sensibles en texto y telefonía; `src/telephony.py`
+conserva reservas SQLite, HMAC DNC independiente y webhooks firmados; `src/observability.py` añade eventos enumerados y
+agregaciones telefónicas sin guardar audio ni texto. `scripts/evaluate_live_voice.py` calcula métricas de anotaciones
+locales, mientras `analytics/` conserva sin mezclar el modelo financiero original de Fase 3. La nueva pestaña de
+Streamlit separa datos telefónicos observados de los escenarios económicos simulados.
+
+### Separación de interfaces
+
+Gradio es exclusivamente la consola de interacción y telefonía de prueba; las métricas agregadas, los conteos
+sintéticos, las simulaciones y el análisis se muestran solamente en Streamlit (`dashboard.py`). No existe un dashboard
+paralelo en Gradio.

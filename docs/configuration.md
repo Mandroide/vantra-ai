@@ -6,15 +6,16 @@ declarada en `compose.yaml` a los contenedores.
 
 ## Servicios de IA
 
-| Variable                                                      | Uso                                                        |
-|---------------------------------------------------------------|------------------------------------------------------------|
-| `VANTRA_MODE`                                                 | `DEMO` (sin proveedores externos) o `LIVE`                 |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`                       | Claude en consultas que requieren LLM                      |
-| `DEEPGRAM_API_KEY` / `DEEPGRAM_MODEL`                         | Reconocimiento de voz                                      |
-| `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`                    | Síntesis de voz; región del mismo recurso                  |
-| `AZURE_SPEECH_VOICE`                                          | Voz configurada de Azure, p. ej. `es-DO-RamonaNeural`      |
-| `LLM_INPUT_USD_PER_MILLION`, `LLM_OUTPUT_USD_PER_MILLION`     | Tarifas de referencia por tokens, actualizar con proveedor |
-| `DEEPGRAM_USD_PER_MINUTE`, `AZURE_USD_PER_MILLION_CHARACTERS` | Tarifas de referencia, 0 **no significa gratuito**         |
+| Variable                                                      | Uso                                                                 |
+|---------------------------------------------------------------|---------------------------------------------------------------------|
+| `VANTRA_MODE`                                                 | `DEMO` (sin proveedores externos) o `LIVE`                          |
+| `VANTRA_FALLBACK`                                             | `texto` (evaluación) o `humano` (piloto: deriva lo que no entiende) |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`                       | Claude en consultas que requieren LLM                               |
+| `DEEPGRAM_API_KEY` / `DEEPGRAM_MODEL`                         | Reconocimiento de voz                                               |
+| `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`                    | Síntesis de voz; región del mismo recurso                           |
+| `AZURE_SPEECH_VOICE`                                          | Voz configurada de Azure, p. ej. `es-DO-RamonaNeural`               |
+| `LLM_INPUT_USD_PER_MILLION`, `LLM_OUTPUT_USD_PER_MILLION`     | Tarifas de referencia por tokens, actualizar con proveedor          |
+| `DEEPGRAM_USD_PER_MINUTE`, `AZURE_USD_PER_MILLION_CHARACTERS` | Tarifas de referencia, 0 **no significa gratuito**                  |
 
 **Nota:** la disponibilidad de modelos, voces y tarifas puede cambiar y debe comprobarse en las cuentas contratadas.
 Azure genera audio μ-law de 8 kHz para Twilio. El modo DEMO no mide precisión acústica ni calidad de Claude.
@@ -63,3 +64,22 @@ python scripts/connectivity.py probe
 cada proveedor y el proceso de migración.
 
 **Referencias:** [Anthropic](https://docs.anthropic.com/), [Deepgram](https://developers.deepgram.com/), [Azure Speech](https://learn.microsoft.com/azure/ai-services/speech-service/), [Twilio Voice](https://www.twilio.com/docs/voice/).
+
+## Dashboard adicional de Fase 3
+
+| Variable                | Función                                                                                                                                                 |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `VANTRA_DASHBOARD_PORT` | Puerto local de Streamlit (por defecto 8501).                                                                                                           |
+| `VANTRA_FALLBACK`       | `texto` (reproducir las pruebas) o `humano` (derivación simulada de consultas no entendidas). Docker Compose la transmite a la aplicación y al webhook. |
+
+`compose.dashboard.yaml` instala Streamlit en un contenedor separado. No requiere credenciales Twilio y opera en modo
+DEMO; utiliza el almacenamiento SQLite existente para telemetría. El túnel solo debe apuntar al webhook, nunca al
+dashboard.
+
+## Configuración v0.4: secreto telefónico independiente
+
+`VANTRA_PHONE_HASH_KEY` es **obligatoria para LIVE con Twilio** (mínimo 32 bytes), diferente de `TWILIO_AUTH_TOKEN` y
+estable entre actualizaciones de Docker. Genérela localmente con
+`python -c "import secrets; print(secrets.token_urlsafe(48))"` y cópiela a `.env`, nunca a GitHub. `compose.yaml` la
+inyecta tanto en `vantra` como en `twilio-webhook`. Si ya existe una DNC antigua, consulte [migración](telephony.md)
+**antes** de rotar el token de Twilio.

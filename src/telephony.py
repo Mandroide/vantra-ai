@@ -50,8 +50,62 @@ def normalize_do_phone(phone: str) -> str:
     return candidate
 
 
+def _new_phone_hash_key() -> bytes:
+    """Separada del token de Twilio; imprescindible para llamadas LIVE."""
+    secret = env('VANTRA_PHONE_HASH_KEY', '')
+    if len(secret.encode('utf-8')) < 32:
+        raise CallPolicyError('Configure VANTRA_PHONE_HASH_KEY con al menos 32 bytes aleatorios.')
+    if secret == env('TWILIO_AUTH_TOKEN', ''):
+        raise CallPolicyError('VANTRA_PHONE_HASH_KEY debe ser distinta del Auth Token de Twilio.')
+    return secret.encode('utf-8')
+
+
 def _phone_hash(phone: str) -> str:
-    return hmac.new(key('TWILIO_AUTH_TOKEN').encode(), phone.encode(), hashlib.sha256).hexdigest()
+    """Formato v2 para permitir distinguir hashes heredados irreversibles."""
+    return 'v2:' + hmac.new(_new_phone_hash_key(), phone.encode(), hashlib.sha256).hexdigest()
+
+
+def _legacy_phone_hash(phone: str, old_token: str) -> str:
+    return hmac.new(old_token.encode(), phone.encode(), hashlib.sha256).hexdigest()
+
+
+def legacy_dnc_count() -> int:
+    """Las exclusiones antiguas bloquean el marcador hasta migrarlas explícitamente."""
+    with closing(_conn()) as c:
+        return c.execute("SELECT COUNT(*) FROM phone_dnc WHERE phone_hash NOT LIKE 'v2:%'").fetchone()[0]
+
+
+def migrate_legacy_dnc(phones: list[str], old_twilio_token: str) -> dict:
+    """Migración transaccional de hashes antiguos para teléfonos conocidos.
+
+    Un hash no revela el número original: registros desconocidos NO pueden
+    recuperarse automáticamente y bloquean las llamadas hasta su resolución.
+    """
+    if not old_twilio_token:
+        raise CallPolicyError('Se necesita el Auth Token anterior para migrar DNC heredado.')
+    _new_phone_hash_key()
+    mapping = {_legacy_phone_hash(normalize_do_phone(n), old_twilio_token): _phone_hash(normalize_do_phone(n))
+               for n in phones}
+    migrated = 0
+    with closing(_conn()) as c:
+        try:
+            c.execute('BEGIN IMMEDIATE')
+            for old_hash, new_hash in mapping.items():
+                row = c.execute('SELECT added_utc FROM phone_dnc WHERE phone_hash=?', (old_hash,)).fetchone()
+                if row:
+                    c.execute('INSERT OR IGNORE INTO phone_dnc(phone_hash,added_utc) VALUES (?,?)',
+                              (new_hash, row[0]))
+                    c.execute('DELETE FROM phone_dnc WHERE phone_hash=?', (old_hash,))
+                    migrated += 1
+                # La tabla de llamadas puede conservar hashes antiguos sin PII:
+                # se migran para que la exclusión desde una llamada histórica siga funcionando.
+                c.execute('UPDATE phone_calls SET phone_hash=? WHERE phone_hash=?', (new_hash, old_hash))
+            remaining = c.execute("SELECT COUNT(*) FROM phone_dnc WHERE phone_hash NOT LIKE 'v2:%'").fetchone()[0]
+            c.execute('COMMIT')
+            return {'migrated': migrated, 'unresolved_legacy_dnc': remaining}
+        except BaseException:
+            c.execute('ROLLBACK')
+            raise
 
 
 def _conn():
@@ -140,6 +194,7 @@ def _preflight(phone: str, confirmed: bool, *, check_time: bool = True) -> str:
     allow_after_hours = env('TWILIO_ALLOW_AFTER_HOURS_TEST_CALLS', 'false').lower() == 'true'
     if check_time and not allow_after_hours and not _allowed_now():
         raise CallPolicyError('Fuera del horario de pruebas: lunes a viernes, 09:00–17:59 (Santo Domingo).')
+    _new_phone_hash_key()
     for field in ('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
                   'TWILIO_PUBLIC_BASE_URL', 'DEEPGRAM_API_KEY', 'AZURE_SPEECH_KEY',
                   'AZURE_SPEECH_REGION', 'ANTHROPIC_API_KEY'):
@@ -177,6 +232,9 @@ def _reserve(phone: str) -> tuple[str, str]:
     with closing(_conn()) as c:
         try:
             c.execute('BEGIN IMMEDIATE')
+            # Evita pérdida silenciosa de opt-outs al rotar TWILIO_AUTH_TOKEN.
+            if c.execute("SELECT 1 FROM phone_dnc WHERE phone_hash NOT LIKE 'v2:%' LIMIT 1").fetchone():
+                raise CallPolicyError('Existen exclusiones DNC heredadas sin migrar; no se permiten llamadas.')
             if c.execute('SELECT 1 FROM phone_dnc WHERE phone_hash=?', (number_hash,)).fetchone():
                 raise CallPolicyError('Este número pidió no recibir más llamadas (DNC).')
             active = c.execute(

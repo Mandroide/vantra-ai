@@ -1,6 +1,6 @@
 # Alternativa sin uv (no congelada). Para reproducción use pyproject.toml + uv.lock.
 gradio>=5.15,<7
-anthropic>=0.49,<2
+anthropic>=0.49,<3
 requests>=2.31,<3
 azure-cognitiveservices-speech>=1.40,<2
 python-dotenv>=1.0,<2

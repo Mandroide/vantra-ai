@@ -33,6 +33,21 @@ adicionales.
 - Mantener las decisiones financieras sensibles y las reclamaciones bajo supervisión humana autorizada antes de
   cualquier piloto institucional.
 
+## Gobernanza de la Fase 3
+
+- **Paridad por registro como criterio de salida:** la brecha formal–coloquial medida en v2 (82.5% frente a 57.9%) es
+  un riesgo de trato desigual; el piloto no avanza mientras la brecha supere 5 puntos con al menos 100 frases reales
+  por registro.
+- **Intenciones críticas:** fraude, privacidad, exclusión de llamadas y pedidos de aprobación se evalúan antes que
+  cualquier otra regla. Meta de avance: tasa de acción equivocada ≤ 1%, demostrada con 300 casos críticos sin error
+  (regla del tres, 95% de confianza).
+- **Derivación por defecto:** en un piloto se configura `VANTRA_FALLBACK=humano`; ninguna consulta no entendida queda
+  sin atención.
+- **Marco aplicable en RD:** Ley 172-13 de protección de datos (con reforma en discusión), régimen de secreto bancario
+  de la Ley 183-02, Reglamento de Seguridad Cibernética y de la Información (Junta Monetaria, 2018) y Reglamento de
+  Protección al Usuario de los Productos y Servicios Financieros (en vigor desde octubre de 2026). Requiere validación
+  de asesoría legal.
+
 ## Estado de validación
 
 Las pruebas automáticas comprueban algunas restricciones de lógica; **no prueban cumplimiento jurídico, ausencia de
@@ -46,3 +61,26 @@ procedimiento consentido de telefonía.
 El cambio de túnel **no altera** el consentimiento, la lista DNC ni las reglas de privacidad. Se deben evitar
 intermediarios que registren audios o datos sensibles sin un acuerdo y controles adecuados. El túnel no sustituye
 autenticación de la interfaz ni autorización de acciones.
+
+## Gobernanza de la telemetría y separación de evidencia
+
+La nueva telemetría conserva solo modo (DEMO/LIVE), categoría de estado, milisegundos de ejecución y momento. No
+registra texto, voz, números de teléfono ni identificadores de clientes. Su retención y borrado siguen siendo
+responsabilidad del operador del piloto. Gradio y Streamlit se publican únicamente en loopback local; exponerlos
+públicamente requeriría autenticación, control de acceso y pruebas adicionales.
+
+No se deben combinar los porcentajes de exactitud textual del held-out v2 con los conteos de interacciones Gradio para
+declarar un éxito operativo medido. Los modelos económicos alternativos del borrador se excluyeron para no presentar ROI
+incompatibles bajo una misma marca.
+
+## Endurecimiento v0.4
+
+La misma política de intenciones críticas se utiliza en Gradio y las llamadas para evitar contradicciones, aunque se
+necesita evaluación independiente de sinónimos y expresiones regionales. En llamadas reales existe autorización
+documentada previa para contactar y procesar la voz; el agente solicita además confirmación verbal, y ante rechazo
+finaliza sin consultar Claude. **Deepgram sí procesa la respuesta verbal necesaria para reconocer la confirmación.**
+
+El HMAC DNC depende de un secreto independiente del token Twilio; la migración de entradas heredadas es explícita y
+falla cerrada si no se puede resolver un hash histórico. Eventos y IDs de llamadas constituyen datos seudonimizados y
+requieren acceso restringido, retención definida y eliminación segura. Las rutas de escalamiento siguen siendo
+simuladas: nunca afirmar transferencia real a un operador.

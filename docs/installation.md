@@ -102,3 +102,34 @@ docker compose down
 Si levantó el sistema con overlay, deténgalo con `python scripts/connectivity.py down`, seleccionando el proveedor
 configurado. Conservar `.env` fuera del repositorio y no copiar salidas de `docker compose config` (puede incluir
 variables sensibles).
+
+## Dashboard Streamlit dentro de Docker (Fase 3 consolidada)
+
+Conserve el `.env` que ya configuró. El **único dashboard** se ejecuta como servicio opcional Streamlit. Gradio se
+mantiene solo para interacción con el agente y telefonía:
+
+```powershell
+docker compose -f compose.yaml -f compose.dashboard.yaml up -d --build
+docker compose -f compose.yaml -f compose.dashboard.yaml ps
+docker compose -f compose.yaml -f compose.dashboard.yaml logs --tail=80 dashboard
+```
+
+- Gradio: <http://127.0.0.1:7860>
+- Streamlit: <http://127.0.0.1:8501>
+- Para detener: `docker compose -f compose.yaml -f compose.dashboard.yaml down` (sin `-v`).
+
+El servicio Streamlit instala las dependencias del grupo `dashboard` mediante `uv.lock` y carga los archivos sintéticos
+de `results/`. Usa el mismo volumen de SQLite para consultar telemetría. Si se activa ngrok, ejecute con ambos overlays
+(`-f compose.ngrok.yaml -f compose.dashboard.yaml`) y no exponga el dashboard en la URL pública de Twilio.
+
+Ejecución local: `uv sync --locked --group dev --group dashboard` seguido de
+`uv run --locked --group dashboard streamlit run dashboard.py`.
+
+El código anterior de simulación DOP del borrador se dejó fuera por ser un modelo diferente del MCMC/Monte Carlo
+presentado en la Fase 3.
+
+## Configuración extra para LIVE (v0.4)
+
+Añada `VANTRA_PHONE_HASH_KEY` a `.env` antes de activar llamadas y manténgala estable. Reconstruya con
+`docker compose up -d --build --force-recreate`. Conserve el volumen `vantra_state`. Para instalaciones con DNC previas,
+ejecute [migración interactiva](telephony.md) antes de cambiar el token anterior.

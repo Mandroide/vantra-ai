@@ -7,6 +7,8 @@ from __future__ import annotations
 import json, os, re, time, unicodedata
 from dataclasses import dataclass, field
 from typing import Any
+from src import nlu
+from src.critical_policy import critical_intent
 from src.config import env, key
 from src.tools import CATALOG, SCHEMAS, execute
 
@@ -46,31 +48,17 @@ Utiliza herramientas si es necesario y no inventes información que no conoces.'
 
 
 def _product(t, previous='prestamo'):
-    if any(x in t for x in ('tarjeta', 'plastico')): return 'tarjeta'
-    if any(x in t for x in ('certificado', 'deposito a plazo')): return 'certificado'
-    if any(x in t for x in ('prestamo', 'credito personal', 'financiamiento')): return 'prestamo'
-    return previous
+    # Fase 3: delega en src/nlu.py (acepta texto canónico con errores de transcripción ya corregidos).
+    return nlu.product(t, previous)
 
 
 def _amt(t):
-    pattern = r'(?<!\d)(\d[\d.,]*)(?:\s*)(mil|millones?)?'
-    nums = []
-    for match in re.finditer(pattern, t):
-        token = match.group(1).strip('.,')
-        try:
-            value = float(token.replace(',', '')) if ',' in token else float(token)
-        except ValueError:
-            continue
-        mult = 1e6 if match.group(2) and 'millon' in match.group(2) else 1000 if match.group(2) == 'mil' else 1
-        nums.append(value * mult)
-    return nums
+    # Fase 3: corrige '1 millon' (antes se leía como 1,000) y acepta montos que llegaron en palabras.
+    return nlu.amounts(t)
 
 
 def _months(t):
-    match = re.search(r'(\d+)\s*(anos?|meses?)', t)
-    if not match: return None
-    n = int(match.group(1));
-    return n * 12 if 'ano' in match.group(2) else n
+    return nlu.months(t)
 
 
 def _call(output, name, params):
@@ -135,34 +123,38 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
         return _reply(text, session, out, raw), session
 
     if not raw: return finish('Escriba su consulta para comenzar.')
-    product = _product(t, session.last_product)
+    # Fase 3: texto canónico (tolerante a errores de transcripción y con números en dígitos) para detectar
+    # intenciones; `t` (normalización original) se conserva para las confirmaciones explícitas.
+    c = nlu.canon(raw)
+    product = _product(c, session.last_product)
     session.last_product = product
-    # Prioridad máxima: denegación datos privados y acciones sensibles.
-    if any(x in t for x in
-           ('numero de cuenta', 'mi saldo', 'contrasena', 'password', 'clave bancaria', 'datos de otro cliente',
-            'cedula real')):
+    # Política crítica única para chat y voz, priorizando DNC y revocación.
+    critical = critical_intent(raw)
+    # La exclusión va antes que «me llamen» para que «no me llamen más» no se convierta en una devolución.
+    if critical == 'dnc':
+        out.status = 'DNC_REQUESTED'
+        session.pending = ''
+        return finish(
+            'Entendido. No se iniciará ninguna campaña ni llamada real. Se respeta su preferencia de no contacto.')
+    if critical == 'private':
         out.status = 'DENIED'
         return finish(
             'No puedo acceder a saldos, cuentas ni credenciales reales. No comparta datos sensibles. Banco Demo es ficticio.')
-    if ('no autorizo' in t or 'no doy permiso' in t or 'rechazo' in t) and any(
-        x in t for x in ('graba', 'graben', 'audio', 'consentimiento')):
+    if critical == 'consent_denied':
         out.status = 'CONSENT_DENIED'
         return finish(
             'Se respeta su decisión. No envíe audio; puede continuar por texto. Este prototipo no inicia grabaciones desde el servidor.')
-    if any(x in t for x in ('fraude', 'me robaron', 'cargo desconocido', 'tarjeta robada')):
+    if critical == 'fraud':
         r = _call(out, 'request_human_transfer', {'reason': 'fraude'})
         return finish(
             f'Por seguridad, detengo este trámite y registro escalamiento ficticio #{r["id"]}. No puedo bloquear una cuenta real.')
-    if any(x in t for x in
-           ('quiero un humano', 'hablar con una persona', 'asesor humano', 'con un agente', 'operador humano')):
+    if critical == 'human':
         r = _call(out, 'request_human_transfer', {'reason': 'solicitud'})
         return finish(f'Registré transferencia simulada #{r["id"]}. No existe conexión con un operador real.')
-    if any(x in t for x in ('queja', 'harto', 'frustrado', 'molesto', 'inconforme', 'pesimo servicio')):
+    if critical == 'complaint':
         r = _call(out, 'request_human_transfer', {'reason': 'queja'})
         return finish(f'Lamento la situación. Se generó una transferencia simulada #{r["id"]} para seguimiento humano.')
-    if any(x in t for x in
-           ('aprobame', 'apruebame', 'aprobacion inmediata', 'apruebenme', 'aprobarme', 'decide si me aprueban',
-            'rechaza mi credito')):
+    if nlu.is_approval(c):
         _call(out, 'check_prequalification', {})
         return finish(
             'No puedo aprobar ni rechazar créditos. Puedo explicar los requisitos ficticios y registrar una solicitud de prueba.')
@@ -175,9 +167,7 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
             return finish(f'Prospecto ficticio registrado #{r["id"]}. No se comunicará con ninguna entidad financiera.')
         r = _call(out, 'schedule_callback', {'confirmed': True, 'topic': 'contacto_demo'})
         return finish(f'Solicitud de devolución de llamada ficticia #{r["id"]} registrada. No se llamará a nadie.')
-    if any(x in t for x in
-           ('me llamen', 'me llame', 'devolver la llamada', 'devolucion de llamada', 'llamada de seguimiento',
-            'quiero una llamada')):
+    if nlu.is_callback(c):
         session.pending = 'callback'
         return finish(
             '¿Confirma que desea registrar una devolución de llamada SIMULADA? Responda «confirmo». No se hará una llamada real.')
@@ -188,17 +178,19 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
         session.pending_product = product
         return finish(
             f'¿Confirma registrar un prospecto FICTICIO para {CATALOG[product]["name"]}? Responda «confirmo». Sin datos personales reales.')
-    if any(x in t for x in ('cuota', 'cuanto pag', 'cotiza', 'cotizacion', 'calcular')):
-        values = _amt(t)
+    if nlu.is_quote(c):
+        values = _amt(c)
         big = [x for x in values if x >= 1000]
-        n = _months(t)
-        if not big or not n:
+        n = _months(c)
+        if big and n:
+            r = _call(out, 'calculate_loan', {'amount': big[0], 'months': n})
+            if 'error' in r: return finish(f'No pude cotizar: {r["error"]}.')
+            return finish(
+                f'Cotización FICTICIA: monto {_format_money(r["amount_dop"])}, plazo {r["months"]} meses y tasa nominal anual {r["annual_rate_pct"]:.1f} %. Cuota estimada {_format_money(r["monthly_payment_dop"])}; total {_format_money(r["total_dop"])}. {r["assumptions"]} No es una oferta vinculante.')
+        # Sin monto: si en realidad pregunta por la tasa («¿cuánto interés cobra al año?»), se responde la tasa.
+        if not nlu.is_rate(c):
             return finish('Indique monto y plazo, por ejemplo: «Cotiza 300000 pesos a 36 meses». Solo simulación.')
-        r = _call(out, 'calculate_loan', {'amount': big[0], 'months': n})
-        if 'error' in r: return finish(f'No pude cotizar: {r["error"]}.')
-        return finish(
-            f'Cotización FICTICIA: monto {_format_money(r["amount_dop"])}, plazo {r["months"]} meses y tasa nominal anual {r["annual_rate_pct"]:.1f} %. Cuota estimada {_format_money(r["monthly_payment_dop"])}; total {_format_money(r["total_dop"])}. {r["assumptions"]} No es una oferta vinculante.')
-    if any(x in t for x in ('tasa', 'interes anual', 'interes del', 'interes de')):
+    if nlu.is_rate(c):
         r = _call(out, 'get_interest_rate', {'product': product})
         return finish(
             f'La tasa nominal anual de {CATALOG[product]["name"]} es {r["annual_rate_pct"]:.1f} % en el catálogo FICTICIO. No constituye oferta real.')
@@ -206,18 +198,12 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
         _call(out, 'check_prequalification', {})
         return finish(
             'Esta precalificación es solo orientación no vinculante. No evalúo solicitudes, apruebo ni rechazo créditos reales.')
-    if any(x in t for x in
-           ('requisito', 'necesito para', 'que necesito', 'documento', 'producto', 'informacion de tarjeta',
-            'que ofrece', 'que es un certificado')):
+    if nlu.is_requirements(c):
         r = _call(out, 'get_product_info', {'product': product})
         return finish(f'{r["name"]}: {r["description"]} Requisitos SIMULADOS: ' + ', '.join(r['requirements']) + '.')
     if any(x in t for x in ('quien eres', 'eres una ia', 'buenos dias', 'hola')):
         return finish(
             'Hola, soy Vantra AI, asistente de Banco Demo (banco ficticio). Puedo explicar productos, tasas y cotizar préstamos simulados.')
-    if 'no me contacte' in t or 'do not call' in t or 'no quiero llamadas' in t:
-        out.status = 'CONSENT_DENIED'
-        return finish(
-            'Entendido. No se iniciará ninguna campaña ni llamada real. Se respeta su preferencia de no contacto.')
     if mode == 'LIVE':
         try:
             text = _anthropic_general(raw, session, out)
@@ -230,5 +216,13 @@ def respond(user_text: str, session: Session | None = None, mode: str | None = N
             return finish(
                 'No puedo verificar cifras en esta respuesta. Solicite una tasa o cotización para consultar las herramientas ficticias.')
         return finish(text)
+    # Política de despliegue (Fase 3): con VANTRA_FALLBACK=humano, toda consulta que el agente no entiende se
+    # deriva a un asesor en lugar de quedar sin atención. Por defecto («texto») se conserva el comportamiento de
+    # la evaluación, para que las métricas del held-out midan comprensión y no la política de derivación.
+    if env('VANTRA_FALLBACK', 'texto').lower() == 'humano':
+        out.status = 'FALLBACK_HUMAN'
+        r = _call(out, 'request_human_transfer', {'reason': 'solicitud'})
+        return finish(
+            f'No estoy segura de haber entendido. Le comunico con un asesor (transferencia simulada #{r["id"]}).')
     return finish(
         'No tengo información verificada sobre esa pregunta. Pruebe con requisitos de tarjetas, tasas o cuotas ficticias.')

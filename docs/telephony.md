@@ -206,3 +206,28 @@ a Twilio debe validarse desde su propia cuenta.
 
 **Documentación
 oficial:** [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams), [Twilio: validación de solicitudes](https://www.twilio.com/docs/usage/security), [ngrok Docker](https://ngrok.com/download/docker), [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/get-started/), [Caddy HTTPS](https://caddyserver.com/docs/automatic-https).
+
+## Migración DNC y consentimiento (v0.4)
+
+Los hashes DNC nuevos son HMAC `v2:` utilizando `VANTRA_PHONE_HASH_KEY`, no `TWILIO_AUTH_TOKEN`. Así una rotación de
+credenciales no elimina las exclusiones nuevas. Si existen registros antiguos, **no se permite llamar hasta
+resolverlos**. Antes de rotar el Auth Token anterior, ejecute interactivamente (sin enviar token ni teléfonos en
+argumentos del shell):
+
+```powershell
+docker compose exec -it vantra python -m scripts.migrate_dnc
+```
+
+La herramienta solicita números históricos conocidos y Auth Token anterior mediante entrada oculta. Los hashes HMAC no
+permiten reconstruir números desconocidos: si quedan registros sin migrar, el marcador permanece bloqueado por
+seguridad; el responsable del piloto debe conciliarlos sin borrar la DNC.
+
+La voz anuncia que es una IA y que Deepgram procesa la intervención. Solo después de una confirmación verbal afirmativa
+el agente procesa consultas generales con Claude. Si se niega el consentimiento, se solicita humano/fraude, o se pide no
+llamar más, informa de la limitación y finaliza; la exclusión DNC se registra antes de finalizar, incluso sin
+confirmación verbal. **El reconocimiento de esa confirmación también requiere tratamiento de voz por Deepgram**, y exige
+autorización previa.
+
+Los eventos enumerados de Twilio, Stream, STT aproximado, agente y TTS se guardan sin contenido ni teléfono en
+`call_events`. `stt_approx` mide desde el último audio recibido, no representa WER ni latencia STT estricta. La base
+SQLite es seudonimizada y exige retención y control de acceso.
